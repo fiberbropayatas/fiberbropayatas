@@ -377,7 +377,7 @@
 
   function renderSignedOut() {
     who.innerHTML = "";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106u\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106u\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106v\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106v\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -713,12 +713,16 @@
     var idBlock = formCard("Valid ID", idBits);
     var heading = isNew ? "New customer" : (customer.name || ((customer.first_name || "") + " " + (customer.last_name || "")).trim() || "Customer");
     var accountNo = customer.account_number || (isNew ? "Auto" : "—");
+    var headerInbox = customer.messenger && String(customer.messenger).trim().indexOf("http") === 0 ? String(customer.messenger).trim() : "";
+    var messengerIcon = "<svg class=\"msg-icon\" viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" aria-hidden=\"true\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.6 8.6 0 0 1-3.8-.9L3 21l1.1-5.4A8.4 8.4 0 1 1 21 11.5z\"/></svg>";
     shell(
       "<section class=\"customer-sticky panel\">" +
       "<a class=\"back-link\" href=\"#customers\">Back to customers</a>" +
       "<div class=\"customer-id\"><h1>" + esc(heading) + "</h1>" +
       "<p>" + (isNew ? "" : "<span class=\"tag\">" + esc(stageLabel(customer.stage)) + "</span> ") +
-      "<span class=\"acct\">Account " + esc(accountNo) + "</span></p></div>" +
+      "<span class=\"acct\">Account " + esc(accountNo) + "</span>" +
+      "<a id=\"messenger-header\" class=\"btn secondary messenger-open\" href=\"" + esc(headerInbox || "#") + "\" target=\"_blank\" rel=\"noopener\"" + (headerInbox ? "" : " hidden") + ">" + messengerIcon + "Messenger</a>" +
+      "</p></div>" +
       "<div class=\"actions\">" + actions + "<button type=\"button\" class=\"btn\" id=\"save-customer\">Save</button></div>" +
       "</section>" +
       (history ? formCard("Stage history", "<ul class=\"history\">" + history + "</ul>") : "") +
@@ -749,17 +753,21 @@
     if (!isNew && customer.valid_id_path) loadValidIdPhoto(customer.valid_id_path);
     var messengerInput = document.getElementById("f-messenger");
     var messengerOpen = document.getElementById("messenger-open");
-    if (messengerInput && messengerOpen) {
-      messengerInput.addEventListener("input", function () {
-        var link = messengerInput.value.trim();
+    var messengerHeader = document.getElementById("messenger-header");
+    function syncMessengerLinks() {
+      if (!messengerInput) return;
+      var link = messengerInput.value.trim();
+      [messengerOpen, messengerHeader].forEach(function (anchor) {
+        if (!anchor) return;
         if (link.indexOf("http") === 0) {
-          messengerOpen.href = link;
-          messengerOpen.hidden = false;
+          anchor.href = link;
+          anchor.hidden = false;
         } else {
-          messengerOpen.hidden = true;
+          anchor.hidden = true;
         }
       });
     }
+    if (messengerInput) messengerInput.addEventListener("input", syncMessengerLinks);
     document.getElementById("save-customer").onclick = function () { saveCustomer(customer, isNew); };
     var next = app.querySelector("[data-next]");
     if (next) next.onclick = function () { moveStage(customer, next.getAttribute("data-next")); };
