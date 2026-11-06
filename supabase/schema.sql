@@ -202,6 +202,20 @@ create table if not exists public.customer_stage_events (
   changed_at timestamptz not null default now()
 );
 
+create table if not exists public.customer_change_log (
+  id bigint generated always as identity primary key,
+  customer_id uuid not null references public.customers (id) on delete cascade,
+  action text not null check (action in ('created', 'updated')),
+  field text,
+  old_value text,
+  new_value text,
+  changed_by text not null,
+  changed_at timestamptz not null default now()
+);
+
+create index if not exists customer_change_log_customer_idx
+  on public.customer_change_log (customer_id, changed_at);
+
 -- Replace an older stage check (activated / ticket_assigned) when this script is re-run.
 do $$
 declare
@@ -475,6 +489,55 @@ create trigger customers_log_insert
   after insert on public.customers
   for each row execute function public.log_customer_insert();
 
+create or replace function public.log_customer_changes()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  actor text;
+  col text;
+  old_json jsonb;
+  new_json jsonb;
+begin
+  actor := coalesce(nullif(auth.jwt() ->> 'email', ''), 'website');
+
+  if tg_op = 'INSERT' then
+    insert into public.customer_change_log (customer_id, action, changed_by)
+    values (new.id, 'created', actor);
+    return new;
+  end if;
+
+  old_json := to_jsonb(old);
+  new_json := to_jsonb(new);
+  for col in select jsonb_object_keys(new_json)
+  loop
+    if col in ('created_at', 'updated_at') then
+      continue;
+    end if;
+    if (old_json -> col) is distinct from (new_json -> col) then
+      insert into public.customer_change_log (
+        customer_id, action, field, old_value, new_value, changed_by
+      ) values (
+        new.id,
+        'updated',
+        col,
+        old_json ->> col,
+        new_json ->> col,
+        actor
+      );
+    end if;
+  end loop;
+  return new;
+end;
+$$;
+
+drop trigger if exists customers_change_log on public.customers;
+create trigger customers_change_log
+  after insert or update on public.customers
+  for each row execute function public.log_customer_changes();
+
 drop trigger if exists customers_ticket_on_activation on public.customers;
 create trigger customers_ticket_on_activation
   after update on public.customers
@@ -497,7 +560,7 @@ create trigger tickets_advance_stage
 grant usage on schema public to anon, authenticated;
 
 revoke all on public.admins, public.investors, public.technicians,
-  public.customers, public.tickets, public.customer_stage_events
+  public.customers, public.tickets, public.customer_stage_events, public.customer_change_log
   from anon, authenticated;
 
 grant select, insert, update, delete on public.admins to authenticated;
@@ -506,6 +569,7 @@ grant select, insert, update, delete on public.technicians to authenticated;
 grant select, insert, update, delete on public.customers to authenticated;
 grant select, insert, update on public.tickets to authenticated;
 grant select on public.customer_stage_events to authenticated;
+grant select on public.customer_change_log to authenticated;
 
 -- Website: inquiry columns only. Stage and source are forced by the insert trigger.
 grant insert (
@@ -540,6 +604,7 @@ alter table public.technicians enable row level security;
 alter table public.customers enable row level security;
 alter table public.tickets enable row level security;
 alter table public.customer_stage_events enable row level security;
+alter table public.customer_change_log enable row level security;
 
 drop policy if exists admins_all on public.admins;
 create policy admins_all on public.admins
@@ -606,6 +671,11 @@ create policy tickets_admin_update on public.tickets
 
 drop policy if exists stage_events_admin_select on public.customer_stage_events;
 create policy stage_events_admin_select on public.customer_stage_events
+  for select to authenticated
+  using (public.is_admin());
+
+drop policy if exists customer_change_log_admin_select on public.customer_change_log;
+create policy customer_change_log_admin_select on public.customer_change_log
   for select to authenticated
   using (public.is_admin());
 

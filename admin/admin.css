@@ -201,6 +201,13 @@ code { font-size: 0.92em; }
 .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.8rem 0; }
 .history { margin: 0.4rem 0 0; padding-left: 1.1rem; color: var(--gray); }
 .history li { margin: 0.2rem 0; }
+.history-title { margin: 1rem 0 0.35rem; font-size: 1rem; }
+.change-list { list-style: none; margin: 0; padding: 0; }
+.change-item { border-top: 1px solid var(--gray-light); padding: 0.75rem 0; }
+.change-item:first-child { border-top: 0; padding-top: 0; }
+.change-meta { color: var(--gray); font-size: 0.85rem; margin-bottom: 0.25rem; }
+.change-fields { margin: 0; padding-left: 1.1rem; }
+.change-fields li { margin: 0.15rem 0; }
 
 table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
 th, td { text-align: left; padding: 0.45rem 0.35rem; border-bottom: 1px solid var(--gray-light); vertical-align: top; }

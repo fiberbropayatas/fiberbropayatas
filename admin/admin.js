@@ -106,7 +106,7 @@
   var cfg = window.FIBERBRO_SUPABASE;
   var db = null;
   var sessionEmail = "";
-  var state = { customers: [], investors: [], technicians: [], tickets: [], admins: [], events: [], ticket: null, customer: null };
+  var state = { customers: [], investors: [], technicians: [], tickets: [], admins: [], events: [], changes: [], ticket: null, customer: null };
   var ui = { q: "", stage: "all", area: "" };
 
   function esc(value) {
@@ -120,6 +120,79 @@
   function stageLabel(id) {
     for (var i = 0; i < STAGES.length; i++) if (STAGES[i].id === id) return STAGES[i].label;
     return id || "";
+  }
+
+  function fieldLabel(key) {
+    for (var s = 0; s < SECTIONS.length; s++) {
+      var fields = SECTIONS[s].fields;
+      for (var i = 0; i < fields.length; i++) {
+        if (fields[i][0] === key) return fields[i][1];
+      }
+    }
+    if (key === "stage") return "Status";
+    if (key === "source") return "Source";
+    if (key === "valid_id_path") return "Valid ID photo";
+    return key || "Field";
+  }
+
+  function manilaTime(value) {
+    var date = new Date(value);
+    if (isNaN(date.getTime())) return "";
+    return date.toLocaleString("en-US", {
+      timeZone: "Asia/Manila",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  }
+
+  function historyValue(field, value) {
+    if (field === "valid_id_path") {
+      if (value == null || String(value).trim() === "") return "(blank)";
+      return "ID photo uploaded";
+    }
+    if (value == null || String(value).trim() === "") return "(blank)";
+    var text = String(value);
+    if (field === "investor_id") text = investorName(value) || text;
+    if (field === "stage") text = stageLabel(value) || text;
+    if (field === "for_disconnection") {
+      if (text === "true") text = "Yes";
+      else if (text === "false") text = "No";
+    }
+    if (text.length > 120) text = text.slice(0, 117) + "...";
+    return text;
+  }
+
+  function changeGroups(rows) {
+    var groups = [];
+    (rows || []).forEach(function (row) {
+      var key = String(row.changed_at) + "|" + String(row.changed_by || "");
+      var last = groups[groups.length - 1];
+      if (!last || last.key !== key) {
+        last = { key: key, changed_at: row.changed_at, changed_by: row.changed_by, items: [] };
+        groups.push(last);
+      }
+      last.items.push(row);
+    });
+    return groups;
+  }
+
+  function changeHistoryHtml(rows) {
+    var groups = changeGroups(rows);
+    if (!groups.length) return "<p class=\"muted\">No changes recorded yet.</p>";
+    return "<ul class=\"change-list\">" + groups.map(function (group) {
+      var lines = group.items.map(function (row) {
+        if (row.action === "created") return "<li>Created the record</li>";
+        return "<li>" + esc(fieldLabel(row.field)) + ": " +
+          esc(historyValue(row.field, row.old_value)) + " → " +
+          esc(historyValue(row.field, row.new_value)) + "</li>";
+      }).join("");
+      return "<li class=\"change-item\"><div class=\"change-meta\">" +
+        esc(manilaTime(group.changed_at)) + " · " + esc(group.changed_by || "website") +
+        "</div><ul class=\"change-fields\">" + lines + "</ul></li>";
+    }).join("") + "</ul>";
   }
 
   function flash(message, ok) {
@@ -288,7 +361,7 @@
 
   function renderSignedOut() {
     who.innerHTML = "";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106n\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106n\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106o\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106o\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -495,8 +568,12 @@
       "<section class=\"panel\"><h1>" + esc(isNew ? "New customer" : (customer.name || "Customer")) + "</h1>" +
       (isNew ? "" : "<p><span class=\"tag\">" + esc(stageLabel(customer.stage)) + "</span> <span class=\"muted\">" + esc(customer.source || "") + "</span></p>") +
       "<div class=\"actions\">" + actions + "<button type=\"button\" class=\"btn secondary\" id=\"save-customer\">Save</button></div>" +
-      (history ? "<ul class=\"history\">" + history + "</ul>" : "") +
-      "</section>" + sections
+      (history ? "<h2 class=\"history-title\">Stage history</h2><ul class=\"history\">" + history + "</ul>" : "") +
+      "</section>" +
+      (isNew ? "" : "<section class=\"panel section-card\"><h2>Change history</h2>" +
+        (state.changeError ? "<p class=\"muted\">" + esc(state.changeError) + "</p>" : changeHistoryHtml(state.changes)) +
+        "</section>") +
+      sections
     );
     var area = document.getElementById("f-area");
     if (area) area.addEventListener("input", function () {
@@ -724,12 +801,15 @@
     return Promise.all([
       db.from("customers").select("*").eq("id", id).single(),
       db.from("customer_stage_events").select("*").eq("customer_id", id).order("changed_at"),
-      db.from("tickets").select("*").eq("customer_id", id).maybeSingle()
+      db.from("tickets").select("*").eq("customer_id", id).maybeSingle(),
+      db.from("customer_change_log").select("*").eq("customer_id", id).order("changed_at", { ascending: true })
     ]).then(function (results) {
       if (results[0].error) throw results[0].error;
       state.customer = results[0].data;
       state.events = results[1].data || [];
       state.ticket = results[2].data || null;
+      state.changes = results[3].error ? [] : (results[3].data || []);
+      state.changeError = results[3].error ? errText(results[3].error) : "";
       renderCustomer(state.customer, false);
     }).catch(function (error) { flash(errText(error)); });
   }
