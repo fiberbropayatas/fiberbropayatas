@@ -132,8 +132,106 @@
       return checked ? checked.value : "";
     }
 
+    var idInput = document.getElementById("idPhoto");
+    var idDrop = document.getElementById("id-drop");
+    var idPicked = document.getElementById("id-photo-picked");
+    var idPreview = document.getElementById("id-photo-preview");
+    var idChange = document.getElementById("id-photo-change");
+    var idPreviewUrl = "";
+    var ID_PHOTO_MAX_BYTES = 10 * 1024 * 1024;
+
+    function clearIdPreview() {
+      if (idPreviewUrl) {
+        URL.revokeObjectURL(idPreviewUrl);
+        idPreviewUrl = "";
+      }
+      if (idPreview) idPreview.removeAttribute("src");
+      if (idPicked) idPicked.hidden = true;
+      if (idDrop) idDrop.classList.remove("has-file");
+    }
+
+    function validateIdFile(file) {
+      if (!file) return "Please upload a photo of your valid ID.";
+      var type = file.type || "";
+      if (type.indexOf("image/") !== 0) return "Please choose an image file (JPG or PNG).";
+      if (file.size > ID_PHOTO_MAX_BYTES) return "That photo is larger than 10 MB. Please choose a smaller one.";
+      return "";
+    }
+
+    function showIdPreview(file) {
+      if (idPreviewUrl) URL.revokeObjectURL(idPreviewUrl);
+      idPreviewUrl = URL.createObjectURL(file);
+      if (idPreview) idPreview.src = idPreviewUrl;
+      if (idPicked) idPicked.hidden = false;
+      if (idDrop) idDrop.classList.add("has-file");
+    }
+
+    function nameForFile(value) {
+      var cleaned = value.replace(/[^A-Za-z0-9]+/g, "");
+      return cleaned || "name";
+    }
+
+    function photoStamp(date) {
+      function pad(n) { return (n < 10 ? "0" : "") + n; }
+      return String(date.getFullYear()) + pad(date.getMonth() + 1) + pad(date.getDate()) + "-" + pad(date.getHours()) + pad(date.getMinutes());
+    }
+
+    function compressIdPhoto(file) {
+      return new Promise(function (resolve, reject) {
+        var url = URL.createObjectURL(file);
+        var img = new Image();
+        img.onload = function () {
+          var maxSide = 1600;
+          var width = img.naturalWidth || img.width;
+          var height = img.naturalHeight || img.height;
+          var scale = Math.min(1, maxSide / Math.max(width, height));
+          var canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(width * scale));
+          canvas.height = Math.max(1, Math.round(height * scale));
+          var ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(url);
+          var dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+          var comma = dataUrl.indexOf(",");
+          resolve(comma === -1 ? "" : dataUrl.slice(comma + 1));
+        };
+        img.onerror = function () {
+          URL.revokeObjectURL(url);
+          reject(new Error("Could not read that photo. Please choose a JPG or PNG."));
+        };
+        img.src = url;
+      });
+    }
+
+    if (idInput) {
+      idInput.addEventListener("change", function () {
+        var file = idInput.files && idInput.files[0];
+        if (!file) {
+          clearIdPreview();
+          return;
+        }
+        var err = validateIdFile(file);
+        if (err) {
+          idInput.value = "";
+          clearIdPreview();
+          showStatus("error", err);
+          return;
+        }
+        showIdPreview(file);
+        if (statusEl) statusEl.hidden = true;
+      });
+    }
+    if (idChange && idInput) {
+      idChange.addEventListener("click", function () {
+        idInput.click();
+      });
+    }
+
     function finishSuccess() {
       form.reset();
+      clearIdPreview();
       if (installField) installField.value = INSTALLATION_FEE + " one-time";
       showStatus("success", "Salamat! We received your inquiry. FiberBro will reply soon via SMS or email.");
     }
@@ -149,10 +247,18 @@
       if (!window.fetch) return; // native POST to the form action
 
       e.preventDefault();
+      var file = idInput && idInput.files ? idInput.files[0] : null;
+      var fileError = validateIdFile(file);
+      if (fileError) {
+        showStatus("error", fileError);
+        if (idInput) idInput.focus();
+        return;
+      }
+
       var submitBtn = form.querySelector('[type="submit"]');
       if (submitBtn) {
         submitBtn.disabled = true;
-        submitBtn.textContent = "Sending…";
+        submitBtn.textContent = "Uploading…";
       }
 
       var firstName = fieldValue("firstName");
@@ -169,49 +275,53 @@
       if (firstName) nameParts.push(firstName);
       if (middleInitial) nameParts.push(middleInitial);
       if (lastName) nameParts.push(lastName);
-      var payload = {
-        name: nameParts.join(" "),
-        email: fieldValue("email"),
-        phone: fieldValue("phone"),
-        plan: selectedPlan(),
-        message: [
-          "Date of Birth: " + birthDate,
-          "Facebook Name: " + facebookName,
-          "Address: " + address,
-          "Landmark: " + landmark,
-          "Valid ID: " + validId,
-          "Preferred installation date: " + installDate,
-          "Referred by: " + referredBy,
-          "Installation fee acknowledged: " + INSTALLATION_FEE
-        ].join("\n"),
-        firstName: firstName,
-        lastName: lastName,
-        middleInitial: middleInitial,
-        birthDate: birthDate,
-        facebookName: facebookName,
-        address: address,
-        landmark: landmark,
-        validId: validId,
-        installDate: installDate,
-        referredBy: referredBy
-      };
 
-      fetch(INQUIRY_ENDPOINT, {
-        method: "POST",
-        body: JSON.stringify(payload)
-      })
-        .then(function (res) {
+      compressIdPhoto(file).then(function (base64) {
+        var payload = {
+          name: nameParts.join(" "),
+          email: fieldValue("email"),
+          phone: fieldValue("phone"),
+          plan: selectedPlan(),
+          message: [
+            "Date of Birth: " + birthDate,
+            "Facebook Name: " + facebookName,
+            "Address: " + address,
+            "Landmark: " + landmark,
+            "Valid ID: " + validId,
+            "Preferred installation date: " + installDate,
+            "Referred by: " + referredBy,
+            "Installation fee acknowledged: " + INSTALLATION_FEE
+          ].join("\n"),
+          firstName: firstName,
+          lastName: lastName,
+          middleInitial: middleInitial,
+          birthDate: birthDate,
+          facebookName: facebookName,
+          address: address,
+          landmark: landmark,
+          validId: validId,
+          installDate: installDate,
+          referredBy: referredBy,
+          idFileName: nameForFile(lastName) + "_" + nameForFile(firstName) + "_" + photoStamp(new Date()) + ".jpg",
+          idMimeType: "image/jpeg",
+          idFile: base64
+        };
+
+        return fetch(INQUIRY_ENDPOINT, {
+          method: "POST",
+          body: JSON.stringify(payload)
+        }).then(function (res) {
           // Success on HTTP ok, or an opaque/redirect response whose body cannot be read.
           // Anything else that still resolved is not a network failure.
           var unreadable = res.type === "opaque" || res.type === "opaqueredirect";
-          if (res.ok || unreadable) {
-            finishSuccess();
-            return;
-          }
-          finishSuccess();
-        })
-        .catch(function () {
-          showStatus("error", "Network error. Please try again or email fiberbropayatas@gmail.com.");
+          if (res.ok || unreadable || res) finishSuccess();
+        });
+      })
+        .catch(function (err) {
+          var network = !err || err.name === "TypeError";
+          showStatus("error", network
+            ? "Network error. Please try again or email fiberbropayatas@gmail.com."
+            : (err.message || "Could not read that photo. Please choose a JPG or PNG."));
         })
         .finally(function () {
           if (submitBtn) {

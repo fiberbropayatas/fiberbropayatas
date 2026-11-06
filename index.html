@@ -23,7 +23,7 @@
   <meta name="twitter:description" content="Local fiber internet for Payatas, Quezon City. Inquire today.">
   <meta name="twitter:image" content="https://fiberbro.pages.dev/assets/img/og-image.png">
 
-  <link rel="stylesheet" href="/assets/css/styles.css?v=20261106b">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=20261106c">
 
   <script type="application/ld+json">
   {
@@ -293,6 +293,18 @@
                   </select>
                   <span class="hint" id="valid-id-note">Please present this ID on installation day.</span>
                 </div>
+                <div class="field">
+                  <label for="idPhoto">Upload photo of Valid ID <span aria-hidden="true">*</span></label>
+                  <div class="id-drop" id="id-drop">
+                    <input id="idPhoto" name="idPhoto" type="file" accept="image/*" capture="environment" required aria-describedby="id-photo-note">
+                    <span class="id-drop-empty">Tap to take or choose a photo</span>
+                    <span class="id-drop-picked" id="id-photo-picked" hidden>
+                      <img id="id-photo-preview" alt="Preview of your valid ID" width="72" height="72">
+                      <button type="button" class="id-upload-change" id="id-photo-change">Change</button>
+                    </span>
+                  </div>
+                  <span class="hint" id="id-photo-note">Clear photo of the front of your ID. JPG/PNG, max 10 MB.</span>
+                </div>
               </div>
             </div>
 
@@ -406,6 +418,6 @@
     </div>
   </footer>
 
-  <script src="/assets/js/main.js?v=20261106b" defer></script>
+  <script src="/assets/js/main.js?v=20261106c" defer></script>
 </body>
 </html>
