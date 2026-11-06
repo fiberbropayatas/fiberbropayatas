@@ -473,6 +473,26 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 }
 .field input:hover, .field select:hover, .field textarea:hover { border-color: #c5c7cb; }
 .field textarea { min-height: 110px; resize: vertical; }
+.form-section { margin: 0 0 1.35rem; }
+.form-section h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+.plan-options { display: flex; flex-direction: column; gap: 0.55rem; }
+.plan-options label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-weight: 600;
+}
+.plan-options input {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.2rem;
+  accent-color: var(--red-deep);
+  flex-shrink: 0;
+}
 .consent {
   display: flex;
   gap: 0.65rem;

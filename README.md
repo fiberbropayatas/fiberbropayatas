@@ -48,7 +48,7 @@ Edit the single `PLANS` array and `INSTALLATION_FEE` at the top of:
 
 `assets/js/main.js`
 
-Plan cards and the form `<select>` options are generated from that block.
+Plan cards are generated from that block. The registration form lists the same three speeds and monthly prices.
 
 ### 2. Logo assets
 

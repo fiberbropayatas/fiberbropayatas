@@ -218,60 +218,125 @@
     <section class="section section-alt inquire" id="inquire" aria-labelledby="inquire-heading">
       <div class="container">
         <div class="section-head">
-          <h2 id="inquire-heading">Inquire now</h2>
+          <h2 id="inquire-heading">Fiberbro Payatas Registration Form</h2>
           <p>Tell us where you are in Payatas and which plan you want. We’ll check availability and reply soon.</p>
         </div>
         <div class="form-card">
-          <form id="inquiry-form" action="https://script.google.com/macros/s/AKfycbwoXSCsiKOZUrCruUhi4nd315ONKpoXgwJsDKHFikLLnAOMlHJmItgSYkiACeu2Cb2mXA/exec" method="POST" novalidate>
+          <form id="inquiry-form" action="https://script.google.com/macros/s/AKfycbwoXSCsiKOZUrCruUhi4nd315ONKpoXgwJsDKHFikLLnAOMlHJmItgSYkiACeu2Cb2mXA/exec" method="POST">
             <input type="hidden" name="installation_fee" id="installation_fee" value="₱1,000 one-time">
             <input type="text" name="_gotcha" class="hp-field" tabindex="-1" autocomplete="off" aria-hidden="true">
 
-            <div class="form-grid two">
-              <div class="field">
-                <label for="name">Full name <span aria-hidden="true">*</span></label>
-                <input id="name" name="name" type="text" required autocomplete="name" placeholder="Juan Dela Cruz">
-              </div>
-              <div class="field">
-                <label for="mobile">Mobile number <span aria-hidden="true">*</span></label>
-                <span class="hint" id="mobile-hint">PH mobile, e.g. 09XXXXXXXXX</span>
-                <input id="mobile" name="mobile" type="tel" required inputmode="tel"
-                       autocomplete="tel-national" placeholder="09XXXXXXXXX"
-                       pattern="^(09|\+639)\d{9}$" aria-describedby="mobile-hint">
-              </div>
-            </div>
-
-            <div class="form-grid" style="margin-top:1rem;">
-              <div class="field">
-                <label for="email">Email <span class="hint">(optional)</span></label>
-                <input id="email" name="email" type="email" autocomplete="email" placeholder="you@email.com">
-              </div>
-              <div class="field">
-                <label for="address">Address or landmark in Payatas <span aria-hidden="true">*</span></label>
-                <input id="address" name="address" type="text" required
-                       placeholder="Street, sitio, or nearby landmark" autocomplete="street-address">
-              </div>
-              <div class="field">
-                <label for="plan">Plan of interest</label>
-                <select id="plan" name="plan">
-                  <option value="">Not sure yet — help me choose</option>
-                  <!-- Options filled by main.js from PLANS config -->
-                </select>
-              </div>
-              <div class="field">
-                <label for="message">Message</label>
-                <textarea id="message" name="message" placeholder="Anything else we should know?"></textarea>
+            <div class="form-section">
+              <h3>Personal information</h3>
+              <div class="form-grid two">
+                <div class="field">
+                  <label for="firstName">Firstname <span aria-hidden="true">*</span></label>
+                  <input id="firstName" name="firstName" type="text" required autocomplete="given-name">
+                </div>
+                <div class="field">
+                  <label for="lastName">Lastname <span aria-hidden="true">*</span></label>
+                  <input id="lastName" name="lastName" type="text" required autocomplete="family-name">
+                </div>
+                <div class="field">
+                  <label for="middleInitial">M.I <span class="hint">(optional)</span></label>
+                  <input id="middleInitial" name="middleInitial" type="text" maxlength="2" autocomplete="additional-name">
+                </div>
+                <div class="field">
+                  <label for="birthDate">Date of Birth <span aria-hidden="true">*</span></label>
+                  <input id="birthDate" name="birthDate" type="date" required autocomplete="bday">
+                </div>
               </div>
             </div>
 
-            <p class="install-fee-note" style="margin-top:1rem;">One-time installation fee: ₱1,000</p>
+            <div class="form-section">
+              <h3>Contact information</h3>
+              <div class="form-grid">
+                <div class="form-grid two">
+                  <div class="field">
+                    <label for="phone">Mobile Number <span aria-hidden="true">*</span></label>
+                    <span class="hint" id="mobile-hint">PH mobile, e.g. 09XXXXXXXXX</span>
+                    <input id="phone" name="phone" type="tel" required inputmode="tel"
+                           autocomplete="tel-national" placeholder="09XXXXXXXXX"
+                           pattern="^09\d{9}$" aria-describedby="mobile-hint">
+                  </div>
+                  <div class="field">
+                    <label for="email">Email address <span class="hint">(optional)</span></label>
+                    <input id="email" name="email" type="email" autocomplete="email" placeholder="you@email.com">
+                  </div>
+                </div>
+                <div class="field">
+                  <label for="facebookName">Facebook Name <span class="hint">(optional)</span></label>
+                  <input id="facebookName" name="facebookName" type="text" autocomplete="off">
+                </div>
+                <div class="field">
+                  <label for="address">Complete Home Address <span aria-hidden="true">*</span></label>
+                  <textarea id="address" name="address" required autocomplete="street-address"></textarea>
+                </div>
+                <div class="field">
+                  <label for="landmark">Landmark/Directions <span class="hint">(optional)</span></label>
+                  <input id="landmark" name="landmark" type="text">
+                </div>
+                <div class="field">
+                  <label for="validId">Valid ID <span aria-hidden="true">*</span></label>
+                  <select id="validId" name="validId" required aria-describedby="valid-id-note">
+                    <option value="" selected>Select an ID</option>
+                    <option>UMID</option>
+                    <option>Driver's License</option>
+                    <option>Passport</option>
+                    <option>PhilSys National ID</option>
+                    <option>Postal ID</option>
+                    <option>Voter's ID</option>
+                    <option>PRC ID</option>
+                    <option>SSS ID</option>
+                    <option>Senior Citizen ID</option>
+                    <option>Other</option>
+                  </select>
+                  <span class="hint" id="valid-id-note">Please present this ID on installation day.</span>
+                </div>
+              </div>
+            </div>
 
-            <div class="consent" style="margin-top:1rem;">
+            <div class="form-section">
+              <h3 id="plan-legend">Choose your desired internet plan</h3>
+              <div class="plan-options" role="radiogroup" aria-labelledby="plan-legend">
+                <label>
+                  <input type="radio" name="plan" value="75–150 Mbps ₱1,000/month" data-plan-id="basic" required>
+                  75–150 Mbps ₱1,000/month
+                </label>
+                <label>
+                  <input type="radio" name="plan" value="150–200 Mbps ₱1,200/month" data-plan-id="plus" required>
+                  150–200 Mbps ₱1,200/month
+                </label>
+                <label>
+                  <input type="radio" name="plan" value="200–300 Mbps ₱1,400/month" data-plan-id="max" required>
+                  200–300 Mbps ₱1,400/month
+                </label>
+              </div>
+            </div>
+
+            <div class="form-section">
+              <h3 id="install-date-legend">Preferred date of installation</h3>
+              <div class="field">
+                <input id="installDate" name="installDate" type="date" required aria-labelledby="install-date-legend">
+              </div>
+            </div>
+
+            <div class="form-section">
+              <h3 id="referred-by-legend">Referred by</h3>
+              <div class="field">
+                <input id="referredBy" name="referredBy" type="text" aria-labelledby="referred-by-legend">
+              </div>
+            </div>
+
+            <div class="consent">
               <input id="consent" name="consent" type="checkbox" value="yes" required>
               <label for="consent">
                 I agree that FiberBro may use my details to respond to this inquiry and check service availability.
                 See our <a href="/privacy.html">Privacy Notice</a> (Data Privacy Act / RA 10173).
               </label>
             </div>
+
+            <p class="install-fee-note" style="margin-top:1rem;">One-time installation fee: ₱1,000</p>
 
             <div style="margin-top:1.25rem;">
               <button class="btn btn-primary btn-block" type="submit">Send inquiry</button>

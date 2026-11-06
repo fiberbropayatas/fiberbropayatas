@@ -94,33 +94,12 @@
     }).join("");
   }
 
-  // Populate plan select
-  var planSelect = document.getElementById("plan");
-  if (planSelect) {
-    // Keep first placeholder option; append plans
-    PLANS.forEach(function (plan) {
-      var opt = document.createElement("option");
-      opt.value = plan.name + " (" + plan.speed + " — " + plan.price + "/mo)";
-      opt.textContent = plan.name + " — " + plan.speed + " · " + plan.price + "/mo";
-      opt.dataset.planId = plan.id;
-      planSelect.appendChild(opt);
-    });
-  }
-
-  // CTA preselect
-  document.querySelectorAll("[data-plan-id]").forEach(function (el) {
+  // Plan-card CTA checks the matching registration radio.
+  document.querySelectorAll("a.plan-cta[data-plan-id]").forEach(function (el) {
     el.addEventListener("click", function () {
       var id = el.getAttribute("data-plan-id");
-      if (!planSelect) return;
-      var match = PLANS.find(function (p) { return p.id === id; });
-      if (!match) return;
-      var wanted = match.name + " (" + match.speed + " — " + match.price + "/mo)";
-      for (var i = 0; i < planSelect.options.length; i++) {
-        if (planSelect.options[i].value === wanted) {
-          planSelect.selectedIndex = i;
-          break;
-        }
-      }
+      var radio = document.querySelector('#inquiry-form input[name="plan"][data-plan-id="' + id + '"]');
+      if (radio) radio.checked = true;
     });
   });
 
@@ -133,15 +112,24 @@
     var installField = document.getElementById("installation_fee");
     if (installField) installField.value = INSTALLATION_FEE + " one-time";
 
-    function planLabel() {
-      if (!planSelect || planSelect.selectedIndex < 0) return "";
-      var opt = planSelect.options[planSelect.selectedIndex];
-      if (!opt) return "";
-      if (opt.dataset.planId) {
-        var match = PLANS.find(function (p) { return p.id === opt.dataset.planId; });
-        if (match) return match.name + " – " + match.speed + " – " + match.price + "/mo";
-      }
-      return opt.textContent || "";
+    var installDateInput = document.getElementById("installDate");
+    if (installDateInput) {
+      var now = new Date();
+      var month = String(now.getMonth() + 1);
+      var day = String(now.getDate());
+      if (month.length < 2) month = "0" + month;
+      if (day.length < 2) day = "0" + day;
+      installDateInput.min = now.getFullYear() + "-" + month + "-" + day;
+    }
+
+    function fieldValue(id) {
+      var el = document.getElementById(id);
+      return el && el.value ? el.value.trim() : "";
+    }
+
+    function selectedPlan() {
+      var checked = form.querySelector('input[name="plan"]:checked');
+      return checked ? checked.value : "";
     }
 
     function finishSuccess() {
@@ -167,14 +155,45 @@
         submitBtn.textContent = "Sending…";
       }
 
-      var address = (form.address && form.address.value) ? form.address.value.trim() : "";
-      var note = (form.message && form.message.value) ? form.message.value.trim() : "";
+      var firstName = fieldValue("firstName");
+      var lastName = fieldValue("lastName");
+      var middleInitial = fieldValue("middleInitial");
+      var birthDate = fieldValue("birthDate");
+      var facebookName = fieldValue("facebookName");
+      var address = fieldValue("address");
+      var landmark = fieldValue("landmark");
+      var validId = fieldValue("validId");
+      var installDate = fieldValue("installDate");
+      var referredBy = fieldValue("referredBy");
+      var nameParts = [];
+      if (firstName) nameParts.push(firstName);
+      if (middleInitial) nameParts.push(middleInitial);
+      if (lastName) nameParts.push(lastName);
       var payload = {
-        name: form.name ? form.name.value.trim() : "",
-        email: form.email ? form.email.value.trim() : "",
-        phone: form.mobile ? form.mobile.value.trim() : "",
-        plan: planLabel(),
-        message: "Address/Landmark: " + address + "\nInstallation fee acknowledged: " + INSTALLATION_FEE + "\n\n" + note
+        name: nameParts.join(" "),
+        email: fieldValue("email"),
+        phone: fieldValue("phone"),
+        plan: selectedPlan(),
+        message: [
+          "Date of Birth: " + birthDate,
+          "Facebook Name: " + facebookName,
+          "Address: " + address,
+          "Landmark: " + landmark,
+          "Valid ID: " + validId,
+          "Preferred installation date: " + installDate,
+          "Referred by: " + referredBy,
+          "Installation fee acknowledged: " + INSTALLATION_FEE
+        ].join("\n"),
+        firstName: firstName,
+        lastName: lastName,
+        middleInitial: middleInitial,
+        birthDate: birthDate,
+        facebookName: facebookName,
+        address: address,
+        landmark: landmark,
+        validId: validId,
+        installDate: installDate,
+        referredBy: referredBy
       };
 
       fetch(INQUIRY_ENDPOINT, {
