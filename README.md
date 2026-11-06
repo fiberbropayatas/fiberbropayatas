@@ -32,21 +32,17 @@ Built for **Cloudflare Pages** (free): plain HTML, CSS, and vanilla JS. No build
 4. Save and deploy. You’ll get a `*.pages.dev` URL.
 5. (Optional) Attach a custom domain under the Pages project → Custom domains.
 
+## Inquiry form
+
+Submissions are posted as JSON to a Google Apps Script web app, which appends each inquiry to a Google Sheet under the company's Google account:
+
+`https://script.google.com/macros/s/AKfycbwoXSCsiKOZUrCruUhi4nd315ONKpoXgwJsDKHFikLLnAOMlHJmItgSYkiACeu2Cb2mXA/exec`
+
+The handler is in `assets/js/main.js`. The form `action` points at the same endpoint so a no-JavaScript submit still POSTs somewhere useful.
+
 ## What to configure after deploy
 
-### 1. Formspree form ID
-
-1. Sign up at [formspree.io](https://formspree.io/) with `fiberbropayatas@gmail.com`.
-2. Create a form; copy the ID (e.g. `abcdefg`).
-3. In `index.html`, replace:
-
-```html
-action="https://formspree.io/f/YOUR_FORM_ID"
-```
-
-with your real ID. Until then, the form shows a friendly error and points visitors to email.
-
-### 2. Plans / prices / features
+### 1. Plans / prices / features
 
 Edit the single `PLANS` array and `INSTALLATION_FEE` at the top of:
 
@@ -54,7 +50,7 @@ Edit the single `PLANS` array and `INSTALLATION_FEE` at the top of:
 
 Plan cards and the form `<select>` options are generated from that block.
 
-### 3. Logo assets
+### 2. Logo assets
 
 The real logo PNG is already in place:
 
@@ -66,11 +62,11 @@ The real logo PNG is already in place:
 
 HTML uses `<picture>` with WebP + PNG fallback.
 
-### 4. Coverage list
+### 3. Coverage list
 
 Replace the TODO items in the Coverage section of `index.html` with confirmed sitios / streets.
 
-### 5. Privacy Notice
+### 4. Privacy Notice
 
 `privacy.html` is a short RA 10173 draft. Have it reviewed before treating it as final. No NPC registration numbers are invented.
 

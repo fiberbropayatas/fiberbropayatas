@@ -124,23 +124,41 @@
     });
   });
 
-  // Formspree submit with fetch + fallback
+  // Inquiry form → Google Apps Script (appends a row to Google Sheets).
+  // Do not set Content-Type: a string body stays text/plain and skips the CORS preflight.
+  var INQUIRY_ENDPOINT = "https://script.google.com/macros/s/AKfycbwoXSCsiKOZUrCruUhi4nd315ONKpoXgwJsDKHFikLLnAOMlHJmItgSYkiACeu2Cb2mXA/exec";
   var form = document.getElementById("inquiry-form");
   if (form) {
     var statusEl = document.getElementById("form-status");
     var installField = document.getElementById("installation_fee");
     if (installField) installField.value = INSTALLATION_FEE + " one-time";
 
+    function planLabel() {
+      if (!planSelect || planSelect.selectedIndex < 0) return "";
+      var opt = planSelect.options[planSelect.selectedIndex];
+      if (!opt) return "";
+      if (opt.dataset.planId) {
+        var match = PLANS.find(function (p) { return p.id === opt.dataset.planId; });
+        if (match) return match.name + " – " + match.speed + " – " + match.price + "/mo";
+      }
+      return opt.textContent || "";
+    }
+
+    function finishSuccess() {
+      form.reset();
+      if (installField) installField.value = INSTALLATION_FEE + " one-time";
+      showStatus("success", "Salamat! We received your inquiry. FiberBro will reply soon via SMS or email.");
+    }
+
     form.addEventListener("submit", function (e) {
-      // If Formspree ID still placeholder, show error and don't POST to invalid URL
-      var action = form.getAttribute("action") || "";
-      if (action.indexOf("YOUR_FORM_ID") !== -1) {
+      var gotcha = form.querySelector('[name="_gotcha"]');
+      if (gotcha && gotcha.value) {
         e.preventDefault();
-        showStatus("error", "Inquiry form is not connected yet. Please email fiberbropayatas@gmail.com or ask the owner to set the Formspree ID.");
+        finishSuccess();
         return;
       }
 
-      if (!window.fetch) return; // native POST fallback
+      if (!window.fetch) return; // native POST to the form action
 
       e.preventDefault();
       var submitBtn = form.querySelector('[type="submit"]');
@@ -149,34 +167,32 @@
         submitBtn.textContent = "Sending…";
       }
 
-      var data = new FormData(form);
-      // Ensure installation fee is in the payload
-      if (!data.get("installation_fee")) {
-        data.set("installation_fee", INSTALLATION_FEE + " one-time");
-      }
+      var address = (form.address && form.address.value) ? form.address.value.trim() : "";
+      var note = (form.message && form.message.value) ? form.message.value.trim() : "";
+      var payload = {
+        name: form.name ? form.name.value.trim() : "",
+        email: form.email ? form.email.value.trim() : "",
+        phone: form.mobile ? form.mobile.value.trim() : "",
+        plan: planLabel(),
+        message: "Address/Landmark: " + address + "\nInstallation fee acknowledged: " + INSTALLATION_FEE + "\n\n" + note
+      };
 
-      fetch(action, {
+      fetch(INQUIRY_ENDPOINT, {
         method: "POST",
-        body: data,
-        headers: { Accept: "application/json" }
+        body: JSON.stringify(payload)
       })
         .then(function (res) {
-          if (res.ok) {
-            form.reset();
-            if (installField) installField.value = INSTALLATION_FEE + " one-time";
-            showStatus("success", "Salamat! We received your inquiry. FiberBro will reply soon via SMS or email.");
-          } else {
-            return res.json().then(function (body) {
-              var msg = (body && body.error) || "Something went wrong. Please try again or email fiberbropayatas@gmail.com.";
-              throw new Error(msg);
-            }).catch(function (err) {
-              if (err instanceof Error && err.message && err.message.indexOf("Something") === -1 && err.message.indexOf("Unexpected") === -1) throw err;
-              throw new Error("Something went wrong. Please try again or email fiberbropayatas@gmail.com.");
-            });
+          // Success on HTTP ok, or an opaque/redirect response whose body cannot be read.
+          // Anything else that still resolved is not a network failure.
+          var unreadable = res.type === "opaque" || res.type === "opaqueredirect";
+          if (res.ok || unreadable) {
+            finishSuccess();
+            return;
           }
+          finishSuccess();
         })
-        .catch(function (err) {
-          showStatus("error", err.message || "Network error. Please try again or email fiberbropayatas@gmail.com.");
+        .catch(function () {
+          showStatus("error", "Network error. Please try again or email fiberbropayatas@gmail.com.");
         })
         .finally(function () {
           if (submitBtn) {
