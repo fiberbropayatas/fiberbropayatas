@@ -105,7 +105,7 @@
 
   // Inquiry form → Google Apps Script (appends a row to Google Sheets).
   // Do not set Content-Type: a string body stays text/plain and skips the CORS preflight.
-  var INQUIRY_ENDPOINT = "https://script.google.com/macros/s/AKfycbwoXSCsiKOZUrCruUhi4nd315ONKpoXgwJsDKHFikLLnAOMlHJmItgSYkiACeu2Cb2mXA/exec";
+  var INQUIRY_ENDPOINT = "https://script.google.com/macros/s/AKfycbwY9a5oRCCG_ztClnLn6Ku4N1fawzALZQV2_Q4sDhUvzRsw-Ha6EFGnObvB1Zu9SpQLBA/exec";
   var form = document.getElementById("inquiry-form");
   if (form) {
     var statusEl = document.getElementById("form-status");
