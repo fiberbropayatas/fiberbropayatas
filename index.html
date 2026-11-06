@@ -299,17 +299,35 @@
             <div class="form-section">
               <h3 id="plan-legend">Choose your desired internet plan</h3>
               <div class="plan-options" role="radiogroup" aria-labelledby="plan-legend">
-                <label>
+                <label class="plan-option">
                   <input type="radio" name="plan" value="75–150 Mbps ₱1,000/month" data-plan-id="basic" required>
-                  75–150 Mbps ₱1,000/month
+                  <span class="plan-option-copy">
+                    <span class="plan-option-top">
+                      <span class="plan-option-name">Basic</span>
+                      <span class="plan-option-price">₱1,000/month</span>
+                    </span>
+                    <span class="plan-option-speed">75–150 Mbps</span>
+                  </span>
                 </label>
-                <label>
+                <label class="plan-option">
                   <input type="radio" name="plan" value="150–200 Mbps ₱1,200/month" data-plan-id="plus" required>
-                  150–200 Mbps ₱1,200/month
+                  <span class="plan-option-copy">
+                    <span class="plan-option-top">
+                      <span class="plan-option-name">Plus <span class="plan-option-tag">Most Popular</span></span>
+                      <span class="plan-option-price">₱1,200/month</span>
+                    </span>
+                    <span class="plan-option-speed">150–200 Mbps</span>
+                  </span>
                 </label>
-                <label>
+                <label class="plan-option">
                   <input type="radio" name="plan" value="200–300 Mbps ₱1,400/month" data-plan-id="max" required>
-                  200–300 Mbps ₱1,400/month
+                  <span class="plan-option-copy">
+                    <span class="plan-option-top">
+                      <span class="plan-option-name">Max</span>
+                      <span class="plan-option-price">₱1,400/month</span>
+                    </span>
+                    <span class="plan-option-speed">200–300 Mbps</span>
+                  </span>
                 </label>
               </div>
             </div>

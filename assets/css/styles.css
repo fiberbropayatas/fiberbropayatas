@@ -479,19 +479,86 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   font-size: 1.05rem;
   font-weight: 800;
 }
-.plan-options { display: flex; flex-direction: column; gap: 0.55rem; }
-.plan-options label {
+.plan-options {
   display: flex;
-  align-items: flex-start;
-  gap: 0.6rem;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+.plan-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1.5px solid var(--gray-light);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
   font-weight: 600;
 }
-.plan-options input {
-  width: 1.15rem;
-  height: 1.15rem;
-  margin-top: 0.2rem;
-  accent-color: var(--red-deep);
+.plan-option input {
+  width: 1.35rem;
+  height: 1.35rem;
+  margin: 0;
+  accent-color: #FF0000;
   flex-shrink: 0;
+}
+.plan-option-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.plan-option-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.plan-option-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 800;
+}
+.plan-option-price {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.plan-option-speed {
+  display: block;
+  color: var(--gray);
+  font-size: 0.92rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.plan-option-tag {
+  display: inline-block;
+  background: #FF0000;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 1.3;
+  text-transform: uppercase;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.plan-option:has(input:checked) {
+  border-color: #FF0000;
+  background: #fff1f1;
+}
+.plan-option:has(input:focus-visible) {
+  outline: 2px solid #FF0000;
+  outline-offset: 2px;
 }
 .consent {
   display: flex;
