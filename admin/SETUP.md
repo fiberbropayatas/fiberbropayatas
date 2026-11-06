@@ -60,9 +60,8 @@ Do not replace it with the service_role key. That key bypasses row level securit
 ## What the portal does
 
 - **Customers** lists inquiries and accounts. Search and filter them, then open a record to edit every master-list field.
-- Stage order is Inquiry → Encoded in Microtech → Activated → Ticket assigned. The database rejects a skip.
+- Stage order is Inquiry → In Progress → Encoded → Active. Choosing an investor moves Inquiry to In Progress. **Mark encoded in MikroTik** and **Mark Active** are the manual steps. Marking Active creates the technician ticket. Assigning that ticket does not change the customer stage.
 - On Inquiry, choose an **Investor**. Investors whose areas include the customer’s area are listed first. Any active investor can still be chosen. The old Referral column is this dropdown.
-- **Encoded in Microtech** and **Activated** are manual buttons. Activation creates the technician ticket. Assigning that ticket moves the customer to Ticket assigned.
 - **Investors** and **Technicians** can be added, edited, and deactivated.
 - Each stage change stores the time and the admin’s email.
 

@@ -94,10 +94,10 @@ create table if not exists public.technicians (
 create table if not exists public.customers (
   id uuid primary key default gen_random_uuid(),
 
-  -- Pipeline. Text plus a check constraint, not a Postgres enum, so there is nothing to insert.
-  -- Allowed values, in order: inquiry, encoded, activated, ticket_assigned.
+  -- Pipeline. Text plus a check constraint, not a Postgres enum.
+  -- Allowed values, in order: inquiry, in_progress, encoded, active.
   stage text not null default 'inquiry'
-    check (stage in ('inquiry', 'encoded', 'activated', 'ticket_assigned')),
+    check (stage in ('inquiry', 'in_progress', 'encoded', 'active')),
   source text not null default 'website'
     check (source in ('website', 'admin')),
 
@@ -200,6 +200,29 @@ create table if not exists public.customer_stage_events (
   changed_at timestamptz not null default now()
 );
 
+-- Replace an older stage check (activated / ticket_assigned) when this script is re-run.
+do $$
+declare
+  r record;
+begin
+  for r in
+    select con.conname
+    from pg_constraint con
+    join pg_class rel on rel.oid = con.conrelid
+    join pg_namespace nsp on nsp.oid = rel.relnamespace
+    where nsp.nspname = 'public'
+      and rel.relname = 'customers'
+      and con.contype = 'c'
+      and pg_get_constraintdef(con.oid) ilike '%inquiry%'
+      and pg_get_constraintdef(con.oid) ilike '%stage%'
+  loop
+    execute format('alter table public.customers drop constraint %I', r.conname);
+  end loop;
+end $$;
+
+alter table public.customers add constraint customers_stage_check
+  check (stage in ('inquiry', 'in_progress', 'encoded', 'active'));
+
 create index if not exists customers_stage_idx on public.customers (stage);
 create index if not exists customers_area_idx on public.customers (area);
 create index if not exists customers_created_idx on public.customers (created_at desc);
@@ -211,6 +234,38 @@ create index if not exists stage_events_customer_idx on public.customer_stage_ev
 -- Stage rules
 -- ---------------------------------------------------------------------------
 
+create or replace function public.stage_label(p_stage text)
+returns text
+language sql
+immutable
+as $$
+  select case p_stage
+    when 'inquiry' then 'Inquiry'
+    when 'in_progress' then 'In Progress'
+    when 'encoded' then 'Encoded'
+    when 'active' then 'Active'
+    else p_stage
+  end;
+$$;
+
+create or replace function public.next_account_number()
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n bigint;
+begin
+  perform pg_advisory_xact_lock(hashtext('fiberbro_account_number'));
+  select coalesce(max(account_number::bigint), 0) + 1
+    into n
+  from public.customers
+  where account_number ~ '^[0-9]+$';
+  return n::text;
+end;
+$$;
+
 create or replace function public.customers_before_insert()
 returns trigger
 language plpgsql
@@ -218,14 +273,27 @@ security definer
 set search_path = public
 as $$
 begin
-  -- Every account starts at Inquiry. Anon inserts are website inquiries.
-  new.stage := 'inquiry';
   if auth.role() = 'anon' then
     new.source := 'website';
     new.investor_id := null;
   elsif new.source is null or new.source not in ('website', 'admin') then
     new.source := 'admin';
   end if;
+
+  if new.investor_id is not null then
+    new.stage := 'in_progress';
+  else
+    new.stage := 'inquiry';
+  end if;
+
+  new.email_address := coalesce(new.email_address, new.email);
+  new.fb_account := coalesce(new.fb_account, new.facebook_name);
+
+  if new.account_number is null or btrim(new.account_number) = '' then
+    new.account_number := public.next_account_number();
+  end if;
+
+  new.account_status := public.stage_label(new.stage);
   return new;
 end;
 $$;
@@ -241,46 +309,54 @@ declare
   new_n int;
 begin
   if new.stage is not distinct from old.stage then
-    return new;
+    if old.stage = 'inquiry' and new.investor_id is not null then
+      new.stage := 'in_progress';
+    elsif old.stage = 'in_progress' and new.investor_id is null then
+      new.stage := 'inquiry';
+    end if;
   end if;
 
-  old_n := case old.stage
-    when 'inquiry' then 1
-    when 'encoded' then 2
-    when 'activated' then 3
-    when 'ticket_assigned' then 4
-    else 0
-  end;
-  new_n := case new.stage
-    when 'inquiry' then 1
-    when 'encoded' then 2
-    when 'activated' then 3
-    when 'ticket_assigned' then 4
-    else 0
-  end;
+  if new.stage is distinct from old.stage then
+    old_n := case old.stage
+      when 'inquiry' then 1
+      when 'in_progress' then 2
+      when 'encoded' then 3
+      when 'active' then 4
+      else 0
+    end;
+    new_n := case new.stage
+      when 'inquiry' then 1
+      when 'in_progress' then 2
+      when 'encoded' then 3
+      when 'active' then 4
+      else 0
+    end;
 
-  if new_n <> old_n + 1 then
-    raise exception 'Cannot move from % to %. Complete the previous stage first.', old.stage, new.stage;
+    if not (
+      (old.stage = 'inquiry' and new.stage = 'in_progress')
+      or (old.stage = 'in_progress' and new.stage = 'inquiry')
+    ) and new_n <> old_n + 1 then
+      raise exception 'Cannot move from % to %. Complete the previous stage first.', old.stage, new.stage;
+    end if;
+
+    if new.stage = 'encoded' and new.investor_id is null then
+      raise exception 'Assign an investor before marking this customer encoded in MikroTik.';
+    end if;
+    if new.stage = 'active' and new.investor_id is null then
+      raise exception 'Assign an investor before marking this customer active.';
+    end if;
+
+    insert into public.customer_stage_events (customer_id, stage, changed_by)
+    values (
+      new.id,
+      new.stage,
+      coalesce(nullif(auth.jwt() ->> 'email', ''), 'system')
+    );
   end if;
 
-  if new.stage = 'encoded' and new.investor_id is null then
-    raise exception 'Assign an investor before marking this customer encoded in Microtech.';
-  end if;
-
-  if new.stage = 'ticket_assigned' and not exists (
-    select 1 from public.tickets t
-    where t.customer_id = new.id and t.technician_id is not null
-  ) then
-    raise exception 'Assign a technician before marking the ticket assigned.';
-  end if;
-
-  insert into public.customer_stage_events (customer_id, stage, changed_by)
-  values (
-    new.id,
-    new.stage,
-    coalesce(nullif(auth.jwt() ->> 'email', ''), 'system')
-  );
-
+  new.account_status := public.stage_label(new.stage);
+  new.email_address := coalesce(new.email_address, new.email);
+  new.fb_account := coalesce(new.fb_account, new.facebook_name);
   return new;
 end;
 $$;
@@ -309,7 +385,7 @@ security definer
 set search_path = public
 as $$
 begin
-  if new.stage = 'activated' and old.stage is distinct from 'activated' then
+  if new.stage = 'active' and old.stage is distinct from 'active' then
     insert into public.tickets (customer_id, status)
     select new.id, 'open'
     where not exists (
@@ -337,8 +413,8 @@ begin
   end if;
 
   select stage into cust_stage from public.customers where id = new.customer_id;
-  if cust_stage is null or cust_stage not in ('activated', 'ticket_assigned') then
-    raise exception 'A technician can be assigned only after the customer is activated.';
+  if cust_stage is distinct from 'active' then
+    raise exception 'A technician can be assigned only when the customer is active.';
   end if;
 
   new.status := 'assigned';
@@ -357,12 +433,7 @@ security definer
 set search_path = public
 as $$
 begin
-  if new.technician_id is not null
-     and (tg_op = 'INSERT' or old.technician_id is distinct from new.technician_id) then
-    update public.customers
-    set stage = 'ticket_assigned'
-    where id = new.customer_id and stage = 'activated';
-  end if;
+  -- Ticket assignment no longer changes the customer stage.
   return new;
 end;
 $$;
@@ -496,7 +567,7 @@ create policy customers_anon_insert on public.customers
     stage = 'inquiry'
     and source = 'website'
     and investor_id is null
-    and account_number is null
+    and account_number ~ '^[0-9]+$'
     and valid_id_drive_url is null
     and char_length(coalesce(name, '')) <= 300
     and char_length(coalesce(address, '')) <= 2000
@@ -517,7 +588,7 @@ create policy tickets_admin_insert on public.tickets
     and exists (
       select 1 from public.customers c
       where c.id = customer_id
-        and c.stage in ('activated', 'ticket_assigned')
+        and c.stage = 'active'
     )
   );
 

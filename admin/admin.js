@@ -3,9 +3,9 @@
 
   var STAGES = [
     { id: "inquiry", label: "Inquiry" },
-    { id: "encoded", label: "Encoded in Microtech" },
-    { id: "activated", label: "Activated" },
-    { id: "ticket_assigned", label: "Ticket assigned" }
+    { id: "in_progress", label: "In Progress" },
+    { id: "encoded", label: "Encoded" },
+    { id: "active", label: "Active" }
   ];
 
   var SECTIONS = [
@@ -20,9 +20,9 @@
       ["messenger", "Messenger", "text"],
       ["contact_number", "Contact number", "text"],
       ["mobile", "Mobile", "text"],
-      ["fb_account", "FB ACCOUNT", "text"],
+      ["fb_account", "Facebook account", "text"],
       ["facebook_name", "Facebook name", "text"],
-      ["email_address", "Email Address", "email"],
+      ["email_address", "Email address", "email"],
       ["email", "Inquiry email", "email"],
       ["valid_id_type", "Valid ID type", "text"],
       ["valid_id_drive_url", "Valid ID Drive link", "url"]
@@ -194,7 +194,7 @@
     var first = pppoeFirstName(firstEl ? firstEl.value : "");
     var last = pppoeLastName(lastEl ? lastEl.value : "");
     if (!first || !last) return "";
-    return code + "-" + last + "-" + first;
+    return (code + "-" + last + "-" + first).toUpperCase();
   }
 
   function applyPppoe(force) {
@@ -203,7 +203,7 @@
     var next = buildPppoe();
     if (!next) return;
     var current = input.value.trim();
-    if (!force && current && current !== lastAutoPppoe) return;
+    if (!force && current && current.toUpperCase() !== lastAutoPppoe) return;
     input.value = next;
     lastAutoPppoe = next;
   }
@@ -287,7 +287,7 @@
 
   function renderSignedOut() {
     who.innerHTML = "";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106k\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106k\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106l\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106l\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -364,7 +364,12 @@
     var label = field[1];
     var type = field[2];
     var value = customer[key];
+    if (key === "email_address" && !value && customer.email) value = customer.email;
+    if (key === "fb_account" && !value && customer.facebook_name) value = customer.facebook_name;
     var id = "f-" + key;
+    if (key === "account_number" && !customer.id) {
+      return "<div class=\"field\"><label for=\"" + id + "\">Account Number</label><input id=\"" + id + "\" data-key=\"account_number\" data-type=\"text\" type=\"text\" placeholder=\"Auto (next number)\" value=\"\"></div>";
+    }
     if (type === "bool") {
       return "<div class=\"field check\"><input id=\"" + id + "\" data-key=\"" + key + "\" data-type=\"bool\" type=\"checkbox\"" + (value ? " checked" : "") + "><label for=\"" + id + "\">" + esc(label) + "</label></div>";
     }
@@ -450,12 +455,19 @@
     }).join("");
     var actions = "";
     if (!isNew && customer.stage === "inquiry") {
-      actions += "<button type=\"button\" class=\"btn\" data-next=\"encoded\">Mark encoded in Microtech</button>";
+      actions += "<p class=\"muted\">Select an investor to move to In Progress.</p>";
+    }
+    if (!isNew && customer.stage === "in_progress") {
+      actions += "<button type=\"button\" class=\"btn\" data-next=\"encoded\">Mark encoded in MikroTik</button>";
     }
     if (!isNew && customer.stage === "encoded") {
-      actions += "<button type=\"button\" class=\"btn\" data-next=\"activated\">Mark activated</button>";
+      actions += "<button type=\"button\" class=\"btn\" data-next=\"active\">Mark Active</button>";
+      actions += "<span class=\"muted\">This creates the technician ticket.</span>";
     }
-    if (!isNew && (customer.stage === "activated" || customer.stage === "ticket_assigned")) {
+    if (!isNew && customer.stage === "active") {
+      var ticketTech = state.ticket ? (techName(state.ticket.technician_id) || "Unassigned") : "No ticket yet";
+      var ticketStatus = state.ticket ? state.ticket.status : "";
+      actions += "<p class=\"muted\">Ticket: " + esc(ticketTech) + (ticketStatus ? " · " + esc(ticketStatus) : "") + "</p>";
       var techOptions = "<option value=\"\">Select technician</option>" + state.technicians.filter(function (tech) {
         return tech.active || (state.ticket && state.ticket.technician_id === tech.id);
       }).map(function (tech) {
@@ -488,7 +500,7 @@
     wirePppoe();
     var generatedPppoe = buildPppoe();
     var pppoeInput = document.getElementById("f-pppoe");
-    if (pppoeInput && generatedPppoe && pppoeInput.value.trim() === generatedPppoe) lastAutoPppoe = generatedPppoe;
+    if (pppoeInput && generatedPppoe && pppoeInput.value.trim().toUpperCase() === generatedPppoe) lastAutoPppoe = generatedPppoe;
     document.getElementById("save-customer").onclick = function () { saveCustomer(customer, isNew); };
     var next = app.querySelector("[data-next]");
     if (next) next.onclick = function () { moveStage(customer, next.getAttribute("data-next")); };
@@ -506,8 +518,9 @@
       if (!payload.name) payload.name = parts.join(" ");
     }
     var query;
+    if (!payload.account_number) delete payload.account_number;
     if (isNew) {
-      payload.stage = "inquiry";
+      delete payload.stage;
       payload.source = "admin";
       query = db.from("customers").insert(payload).select("id").single();
     } else {
@@ -626,7 +639,7 @@
         esc(customer ? stageLabel(customer.stage) : "") + "</td><td data-label=\"Technician\">" + esc(techName(ticket.technician_id) || "Unassigned") +
         "</td><td data-label=\"Status\">" + esc(ticket.status) + "</td><td data-label=\"Assigned\">" + esc(ticket.assigned_by || "") + "</td></tr>";
     }).join("");
-    shell("<section class=\"panel\"><h1>Tickets</h1><p class=\"muted\">A ticket is created when an admin marks the customer activated. Assigning a technician moves the customer to Ticket assigned.</p></section>" +
+    shell("<section class=\"panel\"><h1>Tickets</h1><p class=\"muted\">A ticket is created when an admin marks the customer Active. Assigning a technician updates the ticket only.</p></section>" +
       "<table><thead><tr><th>Customer</th><th>Stage</th><th>Technician</th><th>Status</th><th>Assigned by</th></tr></thead><tbody>" +
       (body || "<tr><td>No tickets yet.</td></tr>") + "</tbody></table>");
   }
