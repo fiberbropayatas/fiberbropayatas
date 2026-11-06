@@ -46,8 +46,9 @@
       ["installation_remarks", "Installation remarks", "textarea"]
     ]},
     { title: "Plan", fields: [
+      ["plan", "Plan", "text"],
+      ["plan_type", "Plan Type", "text"],
       ["plan_speed", "Plan Speed", "text"],
-      ["plan", "Inquiry plan", "text"],
       ["price", "Price", "money"],
       ["plan_status", "Plan Status", "text"]
     ]},
@@ -98,6 +99,11 @@
     ]}
   ];
 
+  var FIBER_PLANS = [
+    { value: "75–150 Mbps ₱1,000/month", speed: "75–150 Mbps", price: 1000, type: "Basic" },
+    { value: "150–200 Mbps ₱1,200/month", speed: "150–200 Mbps", price: 1200, type: "Plus" },
+    { value: "200–300 Mbps ₱1,400/month", speed: "200–300 Mbps", price: 1400, type: "Max" }
+  ];
   var app = document.getElementById("app");
   if (app) {
     app.addEventListener("click", function (event) {
@@ -371,7 +377,7 @@
 
   function renderSignedOut() {
     who.innerHTML = "";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106q\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106q\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106s\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106s\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -530,6 +536,125 @@
     return payload;
   }
 
+  function pesoAmount(value) {
+    if (value == null || value === "") return "";
+    var num = Number(value);
+    if (isNaN(num)) return String(value);
+    return num.toLocaleString("en-PH", { maximumFractionDigits: 2 });
+  }
+
+  function typeClass(planType) {
+    var known = { Basic: "basic", Plus: "plus", Max: "max" };
+    return known[planType] || "other";
+  }
+
+  function typeFromPlan(plan) {
+    var speed = speedFromPlan(plan);
+    if (speed.indexOf("75") === 0) return "Basic";
+    if (speed.indexOf("150") === 0) return "Plus";
+    if (speed.indexOf("200") === 0) return "Max";
+    for (var i = 0; i < FIBER_PLANS.length; i++) {
+      if (FIBER_PLANS[i].value === plan) return FIBER_PLANS[i].type;
+    }
+    return "";
+  }
+
+  function speedFromPlan(plan) {
+    var match = String(plan || "").match(/^\s*(\d+)\s*[–-]\s*(\d+)\s*Mbps/i);
+    if (!match) return "";
+    return match[1] + "–" + match[2] + " Mbps";
+  }
+
+  function priceFromPlan(plan) {
+    var match = String(plan || "").match(/₱\s*([\d,]+(?:\.\d+)?)/);
+    if (!match) return "";
+    var num = Number(match[1].replace(/,/g, ""));
+    return isNaN(num) ? "" : num;
+  }
+
+  function planSummaryHtml(planValue, speed, price, planType) {
+    var match = null;
+    for (var i = 0; i < FIBER_PLANS.length; i++) {
+      if (FIBER_PLANS[i].value === planValue) match = FIBER_PLANS[i];
+    }
+    var badge = speed || speedFromPlan(planValue) || (match ? match.speed : "") || "No plan";
+    var amount = price === "" || price == null ? priceFromPlan(planValue) : price;
+    if (amount === "" || amount == null) amount = match ? match.price : "";
+    var priceText = amount === "" || amount == null ? "—" : ("₱" + pesoAmount(amount) + " / month");
+    var chip = planType
+      ? "<span class=\"status-chip status-" + typeClass(planType) + "\">" + esc(planType) + "</span>"
+      : "<span class=\"status-chip status-blank\">No type</span>";
+    return "<div class=\"plan-summary-row\"><span class=\"plan-pill\">" + esc(badge) + "</span>" +
+      "<strong class=\"plan-price\">" + esc(priceText) + "</strong>" + chip + "</div>" +
+      "<p class=\"muted plan-install\">One-time installation: ₱1,000</p>";
+  }
+
+  function planBySpeed(speed) {
+    for (var i = 0; i < FIBER_PLANS.length; i++) {
+      if (FIBER_PLANS[i].speed === speed) return FIBER_PLANS[i];
+    }
+    return null;
+  }
+
+  function planSectionHtml(customer) {
+    var saved = customer.plan || "";
+    var speed = customer.plan_speed || speedFromPlan(saved);
+    var mapped = planBySpeed(speed);
+    var price = customer.price == null || customer.price === ""
+      ? (mapped ? mapped.price : priceFromPlan(saved))
+      : customer.price;
+    var planType = customer.plan_type || (mapped ? mapped.type : typeFromPlan(saved));
+    var knownSpeed = false;
+    var speedOptions = "<option value=\"\"></option>";
+    FIBER_PLANS.forEach(function (item) {
+      if (speed === item.speed) knownSpeed = true;
+      speedOptions += "<option value=\"" + esc(item.speed) + "\"" + (speed === item.speed ? " selected" : "") + ">" + esc(item.speed) + "</option>";
+    });
+    if (speed && !knownSpeed) speedOptions += "<option value=\"" + esc(speed) + "\" selected>" + esc(speed) + "</option>";
+    var inquiryLine = saved ? "<p class=\"muted plan-inquiry\">From inquiry: " + esc(saved) + "</p>" : "";
+    return "<div class=\"plan-summary\" id=\"plan-summary\" data-inquiry=\"" + esc(saved) + "\">" +
+      planSummaryHtml(saved, speed, price, planType) + "</div>" + inquiryLine +
+      "<div class=\"grid two\">" +
+      "<div class=\"field\"><label for=\"f-plan_speed\">Plan Speed</label><select id=\"f-plan_speed\" data-key=\"plan_speed\" data-type=\"text\">" + speedOptions + "</select></div>" +
+      "<div class=\"field\"><span class=\"field-label\">Price</span><p class=\"plan-readonly\" id=\"plan-price-display\">" + esc(price === "" || price == null ? "—" : ("₱" + pesoAmount(price))) + "</p>" +
+      "<input type=\"hidden\" id=\"f-price\" data-key=\"price\" data-type=\"money\" value=\"" + esc(price) + "\"></div>" +
+      "<div class=\"field\"><span class=\"field-label\">Plan Type</span><p class=\"plan-readonly\" id=\"plan-type-display\">" + esc(planType || "—") + "</p>" +
+      "<input type=\"hidden\" id=\"f-plan_type\" data-key=\"plan_type\" data-type=\"text\" value=\"" + esc(planType) + "\"></div>" +
+      "</div>";
+  }
+
+  function refreshPlanSummary() {
+    var summary = document.getElementById("plan-summary");
+    var speed = document.getElementById("f-plan_speed");
+    var price = document.getElementById("f-price");
+    var planType = document.getElementById("f-plan_type");
+    var priceText = document.getElementById("plan-price-display");
+    var typeText = document.getElementById("plan-type-display");
+    var speedVal = speed ? speed.value : "";
+    var priceVal = price ? price.value : "";
+    var typeVal = planType ? planType.value : "";
+    if (summary) {
+      summary.innerHTML = planSummaryHtml(summary.getAttribute("data-inquiry") || "", speedVal, priceVal, typeVal);
+    }
+    if (priceText) priceText.textContent = priceVal === "" ? "—" : ("₱" + pesoAmount(priceVal));
+    if (typeText) typeText.textContent = typeVal || "—";
+  }
+
+  function wirePlan() {
+    var speed = document.getElementById("f-plan_speed");
+    var price = document.getElementById("f-price");
+    var planType = document.getElementById("f-plan_type");
+    if (!speed) return;
+    speed.onchange = function () {
+      var chosen = planBySpeed(speed.value);
+      if (chosen) {
+        if (price) price.value = String(chosen.price);
+        if (planType) planType.value = chosen.type;
+      }
+      refreshPlanSummary();
+    };
+  }
+
   function formCard(title, body) {
     return "<section class=\"panel section-card\">" +
       "<button type=\"button\" class=\"section-toggle\" aria-expanded=\"true\">" +
@@ -539,9 +664,10 @@
 
   function renderCustomer(customer, isNew) {
     var sections = SECTIONS.map(function (section) {
-      return formCard(section.title, "<div class=\"grid two\">" +
-        section.fields.map(function (field) { return inputHtml(field, customer); }).join("") +
-        "</div>");
+      var body = section.title === "Plan"
+        ? planSectionHtml(customer)
+        : "<div class=\"grid two\">" + section.fields.map(function (field) { return inputHtml(field, customer); }).join("") + "</div>";
+      return formCard(section.title, body);
     }).join("");
     var history = state.events.map(function (event) {
       return "<li>" + esc(stageLabel(event.stage)) + " · " + esc(event.changed_by) + " · " + esc(new Date(event.changed_at).toLocaleString()) + "</li>";
@@ -609,6 +735,7 @@
     });
     lastAutoPppoe = "";
     wirePppoe();
+    wirePlan();
     var generatedPppoe = buildPppoe();
     var pppoeInput = document.getElementById("f-pppoe");
     if (pppoeInput && generatedPppoe && pppoeInput.value.trim().toUpperCase() === generatedPppoe) lastAutoPppoe = generatedPppoe;

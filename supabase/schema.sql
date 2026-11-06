@@ -141,6 +141,7 @@ create table if not exists public.customers (
   plan_split text, -- unused
   price numeric(12, 2),
   plan_status text,
+  plan_type text check (plan_type is null or plan_type in ('Basic', 'Plus', 'Max')),
   investor_id uuid references public.investors (id) on delete restrict,
   due_date_number integer,
   original_due_date date,
@@ -469,6 +470,58 @@ create trigger technicians_set_updated_at
   before update on public.technicians
   for each row execute function public.set_updated_at();
 
+create or replace function public.fill_plan_details()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  speed text;
+  normalized text;
+begin
+  if new.plan_speed is null or btrim(new.plan_speed) = '' then
+    if new.plan is not null and btrim(new.plan) <> '' then
+      speed := btrim((regexp_match(new.plan, '^[[:space:]]*([0-9]+[[:space:]]*(?:–|-)[[:space:]]*[0-9]+[[:space:]]*Mbps)'))[1]);
+      if speed is not null then
+        new.plan_speed := regexp_replace(
+          regexp_replace(speed, '[[:space:]]*(?:–|-)[[:space:]]*', '–'),
+          '[[:space:]]+',
+          ' ',
+          'g'
+        );
+      end if;
+    end if;
+  end if;
+
+  normalized := btrim(coalesce(new.plan_speed, ''));
+  normalized := regexp_replace(
+    regexp_replace(normalized, '[[:space:]]*(?:–|-)[[:space:]]*', '–'),
+    '[[:space:]]+',
+    ' ',
+    'g'
+  );
+
+  -- Known speeds always own price and plan type.
+  if normalized = '75–150 Mbps' then
+    new.price := 1000;
+    new.plan_type := 'Basic';
+  elsif normalized = '150–200 Mbps' then
+    new.price := 1200;
+    new.plan_type := 'Plus';
+  elsif normalized = '200–300 Mbps' then
+    new.price := 1400;
+    new.plan_type := 'Max';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists customers_fill_plan_details on public.customers;
+create trigger customers_fill_plan_details
+  before insert or update on public.customers
+  for each row execute function public.fill_plan_details();
+
 drop trigger if exists customers_set_updated_at on public.customers;
 create trigger customers_set_updated_at
   before update on public.customers
@@ -693,6 +746,10 @@ set public = excluded.public,
 alter table public.customers add column if not exists valid_id_path text;
 alter table public.customers add column if not exists plan_split text;
 comment on column public.customers.plan_split is 'unused';
+alter table public.customers add column if not exists plan_type text;
+alter table public.customers drop constraint if exists customers_plan_type_check;
+alter table public.customers add constraint customers_plan_type_check
+  check (plan_type is null or plan_type in ('Basic', 'Plus', 'Max'));
 
 drop policy if exists valid_ids_anon_upload on storage.objects;
 create policy valid_ids_anon_upload on storage.objects
