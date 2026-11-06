@@ -148,6 +148,75 @@
     location.hash = hash;
   }
 
+  var lastAutoPppoe = "";
+
+  function foldLetters(value) {
+    var text = String(value || "").replace(/ñ/g, "n").replace(/Ñ/g, "N");
+    if (text.normalize) text = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return text;
+  }
+
+  function titleWord(word) {
+    if (!word) return "";
+    return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+  }
+
+  function pppoeLastName(raw) {
+    var suffixes = { jr: 1, sr: 1, ii: 1, iii: 1, iv: 1 };
+    var words = foldLetters(raw).split(/\s+/).map(function (word) {
+      return word.replace(/[^A-Za-z]/g, "");
+    }).filter(Boolean);
+    while (words.length && suffixes[words[words.length - 1].toLowerCase()]) words.pop();
+    return words.map(titleWord).join("");
+  }
+
+  function pppoeFirstName(raw) {
+    var letters = foldLetters(raw).replace(/[^A-Za-z]/g, "");
+    if (!letters) return "";
+    return titleWord(letters.slice(0, 5));
+  }
+
+  function selectedInvestor() {
+    var select = document.getElementById("f-investor_id");
+    if (!select || !select.value) return null;
+    for (var i = 0; i < state.investors.length; i++) {
+      if (state.investors[i].id === select.value) return state.investors[i];
+    }
+    return null;
+  }
+
+  function buildPppoe() {
+    var inv = selectedInvestor();
+    var code = inv && inv.code ? String(inv.code).trim().toUpperCase() : "";
+    if (!code) return "";
+    var firstEl = document.getElementById("f-first_name");
+    var lastEl = document.getElementById("f-last_name");
+    var first = pppoeFirstName(firstEl ? firstEl.value : "");
+    var last = pppoeLastName(lastEl ? lastEl.value : "");
+    if (!first || !last) return "";
+    return code + "-" + last + "-" + first;
+  }
+
+  function applyPppoe(force) {
+    var input = document.getElementById("f-pppoe");
+    if (!input) return;
+    var next = buildPppoe();
+    if (!next) return;
+    var current = input.value.trim();
+    if (!force && current && current !== lastAutoPppoe) return;
+    input.value = next;
+    lastAutoPppoe = next;
+  }
+
+  function wirePppoe() {
+    var select = document.getElementById("f-investor_id");
+    var first = document.getElementById("f-first_name");
+    var last = document.getElementById("f-last_name");
+    if (select) select.onchange = function () { applyPppoe(true); };
+    if (first) first.oninput = function () { applyPppoe(false); };
+    if (last) last.oninput = function () { applyPppoe(false); };
+  }
+
   function investorLabel(inv) {
     if (!inv) return "";
     var code = inv.code ? String(inv.code).trim() : "";
@@ -218,7 +287,7 @@
 
   function renderSignedOut() {
     who.innerHTML = "";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106j\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106j\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106k\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106k\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -337,7 +406,8 @@
       control = "<input id=\"" + id + "\" data-key=\"" + key + "\" data-type=\"text\" type=\"" + htmlType + "\" value=\"" + esc(value || "") + "\">";
     }
     var open = type === "url" && value ? " <a href=\"" + esc(value) + "\" target=\"_blank\" rel=\"noopener\">Open</a>" : "";
-    return "<div class=\"field\"><label for=\"" + id + "\">" + esc(label) + open + "</label>" + control + "</div>";
+    var hint = key === "pppoe" ? "<span class=\"muted\">Auto-filled from investor code and name. You can edit it.</span>" : "";
+    return "<div class=\"field\"><label for=\"" + id + "\">" + esc(label) + open + "</label>" + control + hint + "</div>";
   }
 
   function toLocalInput(value) {
@@ -412,7 +482,13 @@
       holder.innerHTML = inputHtml(["investor_id", "Investor", "investor"], customer);
       select.innerHTML = holder.querySelector("select").innerHTML;
       select.value = current;
+      wirePppoe();
     });
+    lastAutoPppoe = "";
+    wirePppoe();
+    var generatedPppoe = buildPppoe();
+    var pppoeInput = document.getElementById("f-pppoe");
+    if (pppoeInput && generatedPppoe && pppoeInput.value.trim() === generatedPppoe) lastAutoPppoe = generatedPppoe;
     document.getElementById("save-customer").onclick = function () { saveCustomer(customer, isNew); };
     var next = app.querySelector("[data-next]");
     if (next) next.onclick = function () { moveStage(customer, next.getAttribute("data-next")); };
