@@ -287,7 +287,7 @@
 
   function renderSignedOut() {
     who.innerHTML = "";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106l\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106l\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106m\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106m\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -334,7 +334,9 @@
       var title = row.name || ((row.first_name || "") + " " + (row.last_name || "")).trim() || "Unnamed";
       return "<a class=\"row-card\" href=\"#customer/" + row.id + "\"><strong>" + esc(title) + "</strong><span class=\"meta\">" +
         esc(row.area || "No area") + " · " + esc(row.mobile || row.contact_number || "No mobile") + " · " + esc(investorName(row.investor_id) || "No investor") +
-        "</span><div><span class=\"tag\">" + esc(stageLabel(row.stage)) + "</span></div></a>";
+        "</span><div><span class=\"tag\">" + esc(stageLabel(row.stage)) + "</span>" +
+        ((row.valid_id_path || row.valid_id_drive_url) ? " <span class=\"tag\">ID</span>" : "") +
+        "</div></a>";
     }).join("");
     shell(
       "<div class=\"toolbar\"><button type=\"button\" class=\"btn\" id=\"add-customer\">Add customer</button></div>" +
@@ -476,8 +478,19 @@
       }).join("");
       actions += "<select id=\"assign-tech\">" + techOptions + "</select><button type=\"button\" class=\"btn copper\" id=\"assign-ticket\">Assign ticket</button>";
     }
+    var idBlock = "";
+    if (!isNew) {
+      var idBits = "<p><strong>" + esc(customer.valid_id_type || "Type not set") + "</strong></p>";
+      if (customer.valid_id_drive_url) {
+        idBits += "<p><a href=\"" + esc(customer.valid_id_drive_url) + "\" target=\"_blank\" rel=\"noopener\">Open in Google Drive</a></p>";
+      }
+      if (customer.valid_id_path) idBits += "<div id=\"valid-id-photo\"><p class=\"muted\">Loading photo…</p></div>";
+      if (!customer.valid_id_path && !customer.valid_id_drive_url) idBits += "<p>No ID uploaded</p>";
+      idBlock = "<section class=\"panel section-card\"><h2>Valid ID</h2>" + idBits + "</section>";
+    }
     shell(
       "<p><a href=\"#customers\">Back to customers</a></p>" +
+      idBlock +
       "<section class=\"panel\"><h1>" + esc(isNew ? "New customer" : (customer.name || "Customer")) + "</h1>" +
       (isNew ? "" : "<p><span class=\"tag\">" + esc(stageLabel(customer.stage)) + "</span> <span class=\"muted\">" + esc(customer.source || "") + "</span></p>") +
       "<div class=\"actions\">" + actions + "<button type=\"button\" class=\"btn secondary\" id=\"save-customer\">Save</button></div>" +
@@ -501,11 +514,29 @@
     var generatedPppoe = buildPppoe();
     var pppoeInput = document.getElementById("f-pppoe");
     if (pppoeInput && generatedPppoe && pppoeInput.value.trim().toUpperCase() === generatedPppoe) lastAutoPppoe = generatedPppoe;
+    if (!isNew && customer.valid_id_path) loadValidIdPhoto(customer.valid_id_path);
     document.getElementById("save-customer").onclick = function () { saveCustomer(customer, isNew); };
     var next = app.querySelector("[data-next]");
     if (next) next.onclick = function () { moveStage(customer, next.getAttribute("data-next")); };
     var assign = document.getElementById("assign-ticket");
     if (assign) assign.onclick = function () { assignTicket(customer); };
+  }
+
+  function loadValidIdPhoto(path) {
+    var box = document.getElementById("valid-id-photo");
+    if (!box || !db) return;
+    db.storage.from("valid-ids").createSignedUrl(path, 3600).then(function (result) {
+      if (!box.parentNode) return;
+      var url = result && result.data && result.data.signedUrl;
+      if ((result && result.error) || !url) {
+        box.innerHTML = "<p class=\"muted\">Could not load the ID photo.</p>";
+        return;
+      }
+      box.innerHTML = "<p><img class=\"id-thumb\" src=\"" + esc(url) + "\" alt=\"Valid ID photo\"></p>" +
+        "<p><a href=\"" + esc(url) + "\" target=\"_blank\" rel=\"noopener\">Open full size</a></p>";
+    }).catch(function () {
+      if (box.parentNode) box.innerHTML = "<p class=\"muted\">Could not load the ID photo.</p>";
+    });
   }
 
   function saveCustomer(customer, isNew) {

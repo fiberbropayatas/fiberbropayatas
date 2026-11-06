@@ -233,29 +233,86 @@
 
     var SAVE_ERROR = "We could not save your inquiry. Please try again or message us on Messenger.";
 
-    function mirrorInquiry(row) {
+    function inquiryClient() {
       var cfg = window.FIBERBRO_SUPABASE;
       if (!cfg || typeof cfg.isConfigured !== "function" || !cfg.isConfigured()) {
-        return Promise.resolve({ ok: false });
+        return Promise.resolve(null);
       }
       return import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm")
         .then(function (mod) {
-          var client = mod.createClient(cfg.url, cfg.anonKey, {
+          return mod.createClient(cfg.url, cfg.anonKey, {
             auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
           });
-          return client.from("customers").insert(row, { returning: "minimal" });
-        })
-        .then(function (result) {
-          if (result && result.error) {
-            console.error("Supabase inquiry insert failed", result.error);
-            return { ok: false };
-          }
-          return { ok: true };
-        })
-        .catch(function (err) {
-          console.error("Supabase inquiry insert failed", err);
-          return { ok: false };
         });
+    }
+
+    function base64ToBlob(base64) {
+      var clean = String(base64 || "").replace(/[^A-Za-z0-9+/=]/g, "");
+      var binary = atob(clean);
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return new Blob([bytes], { type: "image/jpeg" });
+    }
+
+    function idStoragePath(lastName, firstName) {
+      function part(value) {
+        var text = String(value || "").replace(/ñ/g, "n").replace(/Ñ/g, "N");
+        if (text.normalize) text = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        text = text.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+        return text || "NAME";
+      }
+      function pad(n) { return (n < 10 ? "0" : "") + n; }
+      var now = new Date();
+      var stamp = String(now.getFullYear()) + pad(now.getMonth() + 1) + pad(now.getDate()) + "-" + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
+      var alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+      var rand = "";
+      var bytes = null;
+      if (window.crypto && window.crypto.getRandomValues) {
+        bytes = new Uint8Array(6);
+        window.crypto.getRandomValues(bytes);
+      }
+      for (var i = 0; i < 6; i++) {
+        var n = bytes ? bytes[i] : Math.floor(Math.random() * alphabet.length);
+        rand += alphabet.charAt(n % alphabet.length);
+      }
+      return "inquiries/" + part(lastName) + "_" + part(firstName) + "_" + stamp + "_" + rand + ".jpg";
+    }
+
+    function uploadValidId(client, base64, lastName, firstName) {
+      var path = idStoragePath(lastName, firstName);
+      return client.storage.from("valid-ids").upload(path, base64ToBlob(base64), {
+        contentType: "image/jpeg",
+        upsert: false
+      }).then(function (result) {
+        if (result && result.error) {
+          console.error("Valid ID upload failed", result.error);
+          return null;
+        }
+        return path;
+      }).catch(function (err) {
+        console.error("Valid ID upload failed", err);
+        return null;
+      });
+    }
+
+    function mirrorInquiry(row, base64, lastName, firstName) {
+      return inquiryClient().then(function (client) {
+        if (!client) return { ok: false };
+        return uploadValidId(client, base64, lastName, firstName).then(function (path) {
+          row.valid_id_path = path;
+          return client.from("customers").insert(row, { returning: "minimal" });
+        });
+      }).then(function (result) {
+        if (result && result.ok === false) return result;
+        if (result && result.error) {
+          console.error("Supabase inquiry insert failed", result.error);
+          return { ok: false };
+        }
+        return { ok: true };
+      }).catch(function (err) {
+        console.error("Supabase inquiry insert failed", err);
+        return { ok: false };
+      });
     }
 
     function saveToSheet(payload) {
@@ -368,7 +425,7 @@
 
         return Promise.allSettled([
           saveToSheet(payload),
-          mirrorInquiry(inquiryRow)
+          mirrorInquiry(inquiryRow, base64, lastName, firstName)
         ]).then(function (results) {
           var sheetOk = results[0].status === "fulfilled" && results[0].value && results[0].value.ok === true;
           var supabaseOk = results[1].status === "fulfilled" && results[1].value && results[1].value.ok === true;

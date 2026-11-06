@@ -111,6 +111,7 @@ create table if not exists public.customers (
   facebook_name text,
   valid_id_type text,
   valid_id_drive_url text,
+  valid_id_path text,
   plan text,
   preferred_install_date date,
   referred_by text,
@@ -518,6 +519,7 @@ grant insert (
   address,
   landmark,
   valid_id_type,
+  valid_id_path,
   plan,
   preferred_install_date,
   referred_by,
@@ -569,6 +571,7 @@ create policy customers_anon_insert on public.customers
     and investor_id is null
     and account_number ~ '^[0-9]+$'
     and valid_id_drive_url is null
+    and (valid_id_path is null or valid_id_path ~ '^inquiries/[A-Za-z0-9._-]+$')
     and char_length(coalesce(name, '')) <= 300
     and char_length(coalesce(address, '')) <= 2000
     and char_length(coalesce(landmark, '')) <= 1000
@@ -602,6 +605,38 @@ drop policy if exists stage_events_admin_select on public.customer_stage_events;
 create policy stage_events_admin_select on public.customer_stage_events
   for select to authenticated
   using (public.is_admin());
+
+-- ---------------------------------------------------------------------------
+-- Private valid-ID photos. anon can upload only into inquiries/.
+-- ---------------------------------------------------------------------------
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('valid-ids', 'valid-ids', false, 5242880, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do update
+set public = excluded.public,
+    file_size_limit = excluded.file_size_limit,
+    allowed_mime_types = excluded.allowed_mime_types;
+
+alter table public.customers add column if not exists valid_id_path text;
+
+drop policy if exists valid_ids_anon_upload on storage.objects;
+create policy valid_ids_anon_upload on storage.objects
+  for insert to anon
+  with check (
+    bucket_id = 'valid-ids'
+    and name ~ '^inquiries/[A-Za-z0-9._-]+$'
+  );
+
+drop policy if exists valid_ids_admin_read on storage.objects;
+create policy valid_ids_admin_read on storage.objects
+  for select to authenticated
+  using (bucket_id = 'valid-ids' and public.is_admin());
+
+drop policy if exists valid_ids_admin_write on storage.objects;
+create policy valid_ids_admin_write on storage.objects
+  for all to authenticated
+  using (bucket_id = 'valid-ids' and public.is_admin())
+  with check (bucket_id = 'valid-ids' and public.is_admin());
 
 -- ---------------------------------------------------------------------------
 -- Seed. admins gets the owner. investors is intentionally left with zero rows.
