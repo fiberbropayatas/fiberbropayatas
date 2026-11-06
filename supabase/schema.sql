@@ -138,7 +138,7 @@ create table if not exists public.customers (
   installation_date date,
   installation_remarks text,
   plan_speed text,
-  plan_split text,
+  plan_split text, -- unused
   price numeric(12, 2),
   plan_status text,
   investor_id uuid references public.investors (id) on delete restrict,
@@ -692,6 +692,7 @@ set public = excluded.public,
 
 alter table public.customers add column if not exists valid_id_path text;
 alter table public.customers add column if not exists plan_split text;
+comment on column public.customers.plan_split is 'unused';
 
 drop policy if exists valid_ids_anon_upload on storage.objects;
 create policy valid_ids_anon_upload on storage.objects

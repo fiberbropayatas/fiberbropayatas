@@ -23,9 +23,7 @@
       ["fb_account", "Facebook account", "text"],
       ["facebook_name", "Facebook name", "text"],
       ["email_address", "Email address", "email"],
-      ["email", "Inquiry email", "email"],
-      ["valid_id_type", "Valid ID type", "text"],
-      ["valid_id_drive_url", "Valid ID Drive link", "url"]
+      ["email", "Inquiry email", "email"]
     ]},
     { title: "Location and Network", fields: [
       ["address", "Address", "textarea"],
@@ -50,7 +48,6 @@
     { title: "Plan", fields: [
       ["plan_speed", "Plan Speed", "text"],
       ["plan", "Inquiry plan", "text"],
-      ["plan_split", "Plan Split", "text"],
       ["price", "Price", "money"],
       ["plan_status", "Plan Status", "text"]
     ]},
@@ -102,6 +99,16 @@
   ];
 
   var app = document.getElementById("app");
+  if (app) {
+    app.addEventListener("click", function (event) {
+      var toggle = event.target.closest && event.target.closest(".section-toggle");
+      if (!toggle || !app.contains(toggle)) return;
+      var open = toggle.getAttribute("aria-expanded") === "true";
+      toggle.setAttribute("aria-expanded", open ? "false" : "true");
+      var card = toggle.closest(".section-card");
+      if (card) card.classList.toggle("is-collapsed", open);
+    });
+  }
   var who = document.getElementById("who");
   var cfg = window.FIBERBRO_SUPABASE;
   var db = null;
@@ -132,6 +139,9 @@
     if (key === "stage") return "Status";
     if (key === "source") return "Source";
     if (key === "valid_id_path") return "Valid ID photo";
+    if (key === "valid_id_type") return "Valid ID type";
+    if (key === "valid_id_drive_url") return "Valid ID Drive link";
+    if (key === "plan_split") return "Plan Split";
     return key || "Field";
   }
 
@@ -361,7 +371,7 @@
 
   function renderSignedOut() {
     who.innerHTML = "";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106o\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106o\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106p\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106p\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -520,11 +530,18 @@
     return payload;
   }
 
+  function formCard(title, body) {
+    return "<section class=\"panel section-card\">" +
+      "<button type=\"button\" class=\"section-toggle\" aria-expanded=\"true\">" +
+      "<span>" + esc(title) + "</span><span class=\"chevron\" aria-hidden=\"true\"></span></button>" +
+      "<div class=\"section-body\"><div class=\"section-body-inner\">" + body + "</div></div></section>";
+  }
+
   function renderCustomer(customer, isNew) {
     var sections = SECTIONS.map(function (section) {
-      return "<section class=\"panel section-card\"><h2>" + esc(section.title) + "</h2><div class=\"grid two\">" +
+      return formCard(section.title, "<div class=\"grid two\">" +
         section.fields.map(function (field) { return inputHtml(field, customer); }).join("") +
-        "</div></section>";
+        "</div>");
     }).join("");
     var history = state.events.map(function (event) {
       return "<li>" + esc(stageLabel(event.stage)) + " · " + esc(event.changed_by) + " · " + esc(new Date(event.changed_at).toLocaleString()) + "</li>";
@@ -552,28 +569,31 @@
       }).join("");
       actions += "<select id=\"assign-tech\">" + techOptions + "</select><button type=\"button\" class=\"btn copper\" id=\"assign-ticket\">Assign ticket</button>";
     }
-    var idBlock = "";
-    if (!isNew) {
-      var idBits = "<p><strong>" + esc(customer.valid_id_type || "Type not set") + "</strong></p>";
-      if (customer.valid_id_drive_url) {
-        idBits += "<p><a href=\"" + esc(customer.valid_id_drive_url) + "\" target=\"_blank\" rel=\"noopener\">Open in Google Drive</a></p>";
-      }
-      if (customer.valid_id_path) idBits += "<div id=\"valid-id-photo\"><p class=\"muted\">Loading photo…</p></div>";
-      if (!customer.valid_id_path && !customer.valid_id_drive_url) idBits += "<p>No ID uploaded</p>";
-      idBlock = "<section class=\"panel section-card\"><h2>Valid ID</h2>" + idBits + "</section>";
+    var idBits = "<div class=\"field\"><label for=\"f-valid_id_type\">Valid ID type</label>" +
+      "<input id=\"f-valid_id_type\" data-key=\"valid_id_type\" data-type=\"text\" type=\"text\" value=\"" +
+      esc(customer.valid_id_type || "") + "\"></div>";
+    if (!isNew && customer.valid_id_drive_url) {
+      idBits += "<p><a href=\"" + esc(customer.valid_id_drive_url) + "\" target=\"_blank\" rel=\"noopener\">Open in Google Drive</a></p>";
     }
+    if (!isNew && customer.valid_id_path) idBits += "<div id=\"valid-id-photo\"><p class=\"muted\">Loading photo…</p></div>";
+    if (isNew || (!customer.valid_id_path && !customer.valid_id_drive_url)) idBits += "<p>No ID uploaded</p>";
+    var idBlock = formCard("Valid ID", idBits);
+    var heading = isNew ? "New customer" : (customer.name || ((customer.first_name || "") + " " + (customer.last_name || "")).trim() || "Customer");
+    var accountNo = customer.account_number || (isNew ? "Auto" : "—");
     shell(
-      "<p><a href=\"#customers\">Back to customers</a></p>" +
-      idBlock +
-      "<section class=\"panel\"><h1>" + esc(isNew ? "New customer" : (customer.name || "Customer")) + "</h1>" +
-      (isNew ? "" : "<p><span class=\"tag\">" + esc(stageLabel(customer.stage)) + "</span> <span class=\"muted\">" + esc(customer.source || "") + "</span></p>") +
-      "<div class=\"actions\">" + actions + "<button type=\"button\" class=\"btn secondary\" id=\"save-customer\">Save</button></div>" +
-      (history ? "<h2 class=\"history-title\">Stage history</h2><ul class=\"history\">" + history + "</ul>" : "") +
+      "<section class=\"customer-sticky panel\">" +
+      "<a class=\"back-link\" href=\"#customers\">Back to customers</a>" +
+      "<div class=\"customer-id\"><h1>" + esc(heading) + "</h1>" +
+      "<p>" + (isNew ? "" : "<span class=\"tag\">" + esc(stageLabel(customer.stage)) + "</span> ") +
+      "<span class=\"acct\">Account " + esc(accountNo) + "</span></p></div>" +
+      "<div class=\"actions\">" + actions + "<button type=\"button\" class=\"btn\" id=\"save-customer\">Save</button></div>" +
       "</section>" +
-      (isNew ? "" : "<section class=\"panel section-card\"><h2>Change history</h2>" +
-        (state.changeError ? "<p class=\"muted\">" + esc(state.changeError) + "</p>" : changeHistoryHtml(state.changes)) +
-        "</section>") +
-      sections
+      (history ? formCard("Stage history", "<ul class=\"history\">" + history + "</ul>") : "") +
+      (isNew ? "" : formCard("Change history", state.changeError
+        ? "<p class=\"muted\">" + esc(state.changeError) + "</p>"
+        : changeHistoryHtml(state.changes))) +
+      sections +
+      idBlock
     );
     var area = document.getElementById("f-area");
     if (area) area.addEventListener("input", function () {
