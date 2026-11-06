@@ -371,7 +371,7 @@
 
   function renderSignedOut() {
     who.innerHTML = "";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106p\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106p\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106q\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106q\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -589,11 +589,11 @@
       "<div class=\"actions\">" + actions + "<button type=\"button\" class=\"btn\" id=\"save-customer\">Save</button></div>" +
       "</section>" +
       (history ? formCard("Stage history", "<ul class=\"history\">" + history + "</ul>") : "") +
+      sections +
+      idBlock +
       (isNew ? "" : formCard("Change history", state.changeError
         ? "<p class=\"muted\">" + esc(state.changeError) + "</p>"
-        : changeHistoryHtml(state.changes))) +
-      sections +
-      idBlock
+        : changeHistoryHtml(state.changes)))
     );
     var area = document.getElementById("f-area");
     if (area) area.addEventListener("input", function () {
