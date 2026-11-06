@@ -133,6 +133,8 @@ create table if not exists public.customers (
   nap text,
   port text,
   pppoe text,
+  latitude double precision,
+  longitude double precision,
   installed_by text,
   installation_status text,
   installation_date date,
@@ -778,3 +780,9 @@ create policy valid_ids_admin_write on storage.objects
 insert into public.admins (email)
 values ('fiberbropayatas@gmail.com')
 on conflict (email) do nothing;
+
+alter table public.customers add column if not exists latitude double precision;
+alter table public.customers add column if not exists longitude double precision;
+
+-- Billing, payments, the network map, and repair tickets are recorded in
+-- supabase/migrations/billing_payments_map_tickets.sql (already applied).

@@ -33,7 +33,9 @@
       ["lp", "LP", "text"],
       ["nap", "NAP", "text"],
       ["port", "Port", "text"],
-      ["pppoe", "PPPoE", "text"]
+      ["pppoe", "PPPoE", "text"],
+      ["latitude", "Latitude", "float"],
+      ["longitude", "Longitude", "float"]
     ]},
     { title: "Installation", fields: [
       ["investor_id", "Investor", "investor"],
@@ -229,9 +231,9 @@
   }
 
   function route() {
-    var hash = (location.hash || "#customers").replace(/^#\/?/, "");
+    var hash = (location.hash || "#dashboard").replace(/^#\/?/, "");
     var parts = hash.split("/").filter(Boolean);
-    return { name: parts[0] || "customers", id: parts[1] || "" };
+    return { name: parts[0] || "dashboard", id: parts[1] || "" };
   }
 
   function go(hash) {
@@ -361,10 +363,16 @@
 
   function shell(body) {
     var links = [
+      ["dashboard", "Dashboard"],
       ["customers", "Customers"],
+      ["billing", "Billing"],
+      ["payments", "Payments"],
+      ["map", "Map"],
+      ["repairs", "Repairs"],
       ["investors", "Investors"],
       ["technicians", "Technicians"],
-      ["tickets", "Tickets"],
+      ["tickets", "Install tickets"],
+      ["settings", "Settings"],
       ["admins", "Admins"]
     ];
     var current = route().name;
@@ -377,7 +385,7 @@
 
   function renderSignedOut() {
     who.innerHTML = "";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106w\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106w\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106x\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106x\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -503,8 +511,8 @@
       control = "<input id=\"" + id + "\" data-key=\"" + key + "\" data-type=\"datetime\" type=\"datetime-local\" value=\"" + esc(toLocalInput(value)) + "\">";
     } else if (type === "date") {
       control = "<input id=\"" + id + "\" data-key=\"" + key + "\" data-type=\"date\" type=\"date\" value=\"" + esc(value ? String(value).slice(0, 10) : "") + "\">";
-    } else if (type === "money" || type === "int") {
-      control = "<input id=\"" + id + "\" data-key=\"" + key + "\" data-type=\"" + type + "\" type=\"number\" step=\"" + (type === "int" ? "1" : "0.01") + "\" value=\"" + esc(value == null ? "" : value) + "\">";
+    } else if (type === "money" || type === "int" || type === "float") {
+      control = "<input id=\"" + id + "\" data-key=\"" + key + "\" data-type=\"" + type + "\" type=\"number\" step=\"" + (type === "float" ? "any" : (type === "int" ? "1" : "0.01")) + "\" value=\"" + esc(value == null ? "" : value) + "\">";
     } else {
       var htmlType = type === "email" || type === "url" ? type : "text";
       control = "<input id=\"" + id + "\" data-key=\"" + key + "\" data-type=\"text\" type=\"" + htmlType + "\" value=\"" + esc(value || "") + "\">";
@@ -536,7 +544,7 @@
         payload[key] = null;
         return;
       }
-      if (type === "money" || type === "int") payload[key] = Number(raw);
+      if (type === "money" || type === "int" || type === "float") payload[key] = Number(raw);
       else if (type === "datetime") payload[key] = new Date(raw).toISOString();
       else payload[key] = raw;
     });
@@ -674,6 +682,9 @@
       var body = section.title === "Plan"
         ? planSectionHtml(customer)
         : "<div class=\"grid two\">" + section.fields.map(function (field) { return inputHtml(field, customer); }).join("") + "</div>";
+      if (section.title === "Location and Network") {
+        body += "<p><button type=\"button\" class=\"btn secondary\" id=\"pick-map\">Pick on map</button></p><div id=\"customer-mini-map\" class=\"mini-map\"></div>";
+      }
       return formCard(section.title, body);
     }).join("");
     var history = state.events.map(function (event) {
@@ -724,6 +735,7 @@
       (history ? formCard("Stage history", "<ul class=\"history\">" + history + "</ul>") : "") +
       sections +
       idBlock +
+      (isNew ? "" : billsCard(customer)) +
       (isNew ? "" : formCard("Change history", state.changeError
         ? "<p class=\"muted\">" + esc(state.changeError) + "</p>"
         : changeHistoryHtml(state.changes)))
@@ -747,6 +759,8 @@
     var pppoeInput = document.getElementById("f-pppoe");
     if (pppoeInput && generatedPppoe && pppoeInput.value.trim().toUpperCase() === generatedPppoe) lastAutoPppoe = generatedPppoe;
     if (!isNew && customer.valid_id_path) loadValidIdPhoto(customer.valid_id_path);
+    initCustomerMiniMap();
+    wireQuickBill(customer);
     var messengerInput = document.getElementById("f-messenger");
     var messengerOpen = document.getElementById("messenger-open");
     if (messengerInput && messengerOpen) {
@@ -915,7 +929,7 @@
         esc(customer ? stageLabel(customer.stage) : "") + "</td><td data-label=\"Technician\">" + esc(techName(ticket.technician_id) || "Unassigned") +
         "</td><td data-label=\"Status\">" + esc(ticket.status) + "</td><td data-label=\"Assigned\">" + esc(ticket.assigned_by || "") + "</td></tr>";
     }).join("");
-    shell("<section class=\"panel\"><h1>Tickets</h1><p class=\"muted\">A ticket is created when an admin marks the customer Active. Assigning a technician updates the ticket only.</p></section>" +
+    shell("<section class=\"panel\"><h1>Install tickets</h1><p class=\"muted\">A ticket is created when an admin marks the customer Active. Assigning a technician updates the ticket only.</p></section>" +
       "<table><thead><tr><th>Customer</th><th>Stage</th><th>Technician</th><th>Status</th><th>Assigned by</th></tr></thead><tbody>" +
       (body || "<tr><td>No tickets yet.</td></tr>") + "</tbody></table>");
   }
@@ -965,23 +979,638 @@
   }
 
   function loadCustomer(id) {
+    var gen = viewGen;
     return Promise.all([
       db.from("customers").select("*").eq("id", id).single(),
       db.from("customer_stage_events").select("*").eq("customer_id", id).order("changed_at"),
       db.from("tickets").select("*").eq("customer_id", id).maybeSingle(),
-      db.from("customer_change_log").select("*").eq("customer_id", id).order("changed_at", { ascending: true })
+      db.from("customer_change_log").select("*").eq("customer_id", id).order("changed_at", { ascending: true }),
+      db.from("invoices").select("*").eq("customer_id", id).order("period", { ascending: false }),
+      db.from("payments").select("*").eq("customer_id", id).order("submitted_at", { ascending: false })
     ]).then(function (results) {
       if (results[0].error) throw results[0].error;
+      if (gen !== viewGen) return;
       state.customer = results[0].data;
       state.events = results[1].data || [];
       state.ticket = results[2].data || null;
       state.changes = results[3].error ? [] : (results[3].data || []);
       state.changeError = results[3].error ? errText(results[3].error) : "";
+      state.invoices = results[4] && !results[4].error ? (results[4].data || []) : [];
+      state.pays = results[5] && !results[5].error ? (results[5].data || []) : [];
       renderCustomer(state.customer, false);
     }).catch(function (error) { flash(errText(error)); });
   }
 
+  function money(amount) {
+    var num = Number(amount);
+    if (isNaN(num)) return "—";
+    return "₱" + num.toLocaleString("en-PH", { maximumFractionDigits: 2 });
+  }
+
+  function manilaPeriod(value) {
+    var date = value ? new Date(value) : new Date();
+    if (isNaN(date.getTime())) return "";
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit"
+    }).format(date).slice(0, 7);
+  }
+
+  var viewGen = 0;
+
+  function customerChoices() {
+    return state.customers.map(function (row) {
+      var label = (row.account_number ? row.account_number + " · " : "") + (row.name || row.first_name || "Customer");
+      return "<option value=\"" + row.id + "\">" + esc(label) + "</option>";
+    }).join("");
+  }
+
+  function barChart(pairs) {
+    var max = 1;
+    pairs.forEach(function (pair) { if (pair[1] > max) max = pair[1]; });
+    var width = 320;
+    var rowH = 28;
+    var height = pairs.length * rowH + 8;
+    var bars = pairs.map(function (pair, index) {
+      var w = Math.round((pair[1] / max) * 180);
+      var y = 8 + index * rowH;
+      return "<text x=\"0\" y=\"" + (y + 14) + "\" font-size=\"11\">" + esc(pair[0]) + "</text>" +
+        "<rect x=\"110\" y=\"" + y + "\" width=\"" + w + "\" height=\"16\" fill=\"#FF0000\" rx=\"4\"></rect>" +
+        "<text x=\"" + (116 + w) + "\" y=\"" + (y + 13) + "\" font-size=\"11\">" + pair[1] + "</text>";
+    }).join("");
+    return "<svg class=\"chart\" viewBox=\"0 0 " + width + " " + height + "\" role=\"img\">" + bars + "</svg>";
+  }
+
+  function pieChart(pairs) {
+    var total = pairs.reduce(function (sum, pair) { return sum + pair[1]; }, 0) || 1;
+    var colors = ["#FF0000", "#B87333", "#2C2F33", "#E8E9EB"];
+    var angle = -Math.PI / 2;
+      var slices = pairs.map(function (pair, index) {
+      if (pair[1] === 0) return "";
+      if (pair[1] === total) {
+        return "<circle cx=\"70\" cy=\"70\" r=\"50\" fill=\"" + colors[index % colors.length] + "\"></circle>";
+      }
+      var sweep = (pair[1] / total) * Math.PI * 2;
+      var x1 = 70 + Math.cos(angle) * 50;
+      var y1 = 70 + Math.sin(angle) * 50;
+      angle += sweep;
+      var x2 = 70 + Math.cos(angle) * 50;
+      var y2 = 70 + Math.sin(angle) * 50;
+      var large = sweep > Math.PI ? 1 : 0;
+      return "<path d=\"M70 70 L" + x1.toFixed(1) + " " + y1.toFixed(1) + " A50 50 0 " + large + " 1 " + x2.toFixed(1) + " " + y2.toFixed(1) + " Z\" fill=\"" + colors[index % colors.length] + "\"></path>";
+    }).join("");
+    var legend = pairs.map(function (pair, index) {
+      return "<span class=\"legend-item\"><i style=\"background:" + colors[index % colors.length] + "\"></i>" + esc(pair[0]) + " " + pair[1] + "</span>";
+    }).join("");
+    return "<svg class=\"chart pie\" viewBox=\"0 0 140 140\" role=\"img\">" + slices + "</svg><div class=\"legend\">" + legend + "</div>";
+  }
+
+  function renderDashboard() {
+    var gen = viewGen;
+    shell("<section class=\"panel\"><h1>Dashboard</h1><p class=\"muted\">Loading…</p></section>");
+    var month = manilaPeriod();
+    Promise.all([
+      db.from("customers").select("id, stage"),
+      db.from("invoices").select("status, amount, period"),
+      db.from("payments").select("status, amount, submitted_at, confirmed_at"),
+      db.from("repair_tickets").select("status")
+    ]).then(function (parts) {
+      parts.forEach(function (part) { if (part.error) throw part.error; });
+      var customers = parts[0].data || [];
+      var invoices = parts[1].data || [];
+      var payments = parts[2].data || [];
+      var repairs = parts[3].data || [];
+      var stageCounts = {};
+      STAGES.forEach(function (stage) { stageCounts[stage.id] = 0; });
+      customers.forEach(function (row) {
+        if (stageCounts[row.stage] == null) stageCounts[row.stage] = 0;
+        stageCounts[row.stage] += 1;
+      });
+      var unpaid = invoices.filter(function (row) { return row.status === "unpaid" || row.status === "pending"; });
+      var unpaidTotal = unpaid.reduce(function (sum, row) { return sum + Number(row.amount || 0); }, 0);
+      var pendingPays = payments.filter(function (row) { return row.status === "pending"; }).length;
+      var collected = payments.filter(function (row) {
+        return row.status === "confirmed" && manilaPeriod(row.confirmed_at || row.submitted_at) === month;
+      }).reduce(function (sum, row) { return sum + Number(row.amount || 0); }, 0);
+      var openRepairs = repairs.filter(function (row) { return row.status !== "resolved"; }).length;
+      if (gen !== viewGen) return;
+      var cards = [
+        ["Customers", customers.length],
+        ["Inquiry", stageCounts.inquiry || 0],
+        ["In Progress", stageCounts.in_progress || 0],
+        ["Encoded", stageCounts.encoded || 0],
+        ["Active", stageCounts.active || 0],
+        ["Unpaid bills", unpaid.length + " · " + money(unpaidTotal)],
+        ["Pending payments", pendingPays],
+        ["Collected this month", money(collected)],
+        ["Open repairs", openRepairs]
+      ].map(function (card) {
+        return "<article class=\"stat-card\"><span>" + esc(card[0]) + "</span><strong>" + esc(card[1]) + "</strong></article>";
+      }).join("");
+      var bars = barChart(STAGES.map(function (stage) { return [stage.label, stageCounts[stage.id] || 0]; }));
+      var statuses = ["unpaid", "pending", "paid", "void"];
+      var pie = pieChart(statuses.map(function (status) {
+        return [status, invoices.filter(function (row) { return row.status === status; }).length];
+      }));
+      shell("<section class=\"panel\"><h1>Dashboard</h1><div class=\"stat-grid\">" + cards + "</div></section>" +
+        "<div class=\"chart-grid\"><section class=\"panel\"><h2>Customers by stage</h2>" + bars + "</section>" +
+        "<section class=\"panel\"><h2>Invoice status</h2>" + pie + "</section></div>");
+    }).catch(function (error) { flash(errText(error)); });
+  }
+
+  function renderBilling() {
+    var gen = viewGen;
+    shell("<section class=\"panel\"><h1>Billing</h1><p class=\"muted\">Loading bills…</p></section>");
+    db.from("invoices").select("*, customers(name, account_number, monthly_bill, price)").order("period", { ascending: false }).then(function (result) {
+      if (result.error) return flash(errText(result.error));
+      if (gen !== viewGen) return;
+      var rows = result.data || [];
+      var periods = [];
+      rows.forEach(function (row) { if (periods.indexOf(row.period) === -1) periods.push(row.period); });
+      var body = rows.map(function (row) {
+        var person = row.customers || {};
+        return "<tr data-search=\"" + esc(((person.name || "") + " " + (person.account_number || "")).toLowerCase()) + "\" data-status=\"" + esc(row.status) + "\" data-period=\"" + esc(row.period) + "\">" +
+          "<td data-label=\"Customer\">" + esc(person.name || "") + "<br><span class=\"muted\">" + esc(person.account_number || "") + "</span></td>" +
+          "<td data-label=\"Period\">" + esc(row.period) + "</td><td data-label=\"Amount\">" + esc(money(row.amount)) + "</td>" +
+          "<td data-label=\"Due\">" + esc(row.due_date || "—") + "</td><td data-label=\"Status\">" + esc(row.status) + "</td>" +
+          "<td data-label=\"\">" + (row.status === "void" ? "" : "<button type=\"button\" class=\"btn secondary\" data-void=\"" + row.id + "\">Void</button>") + "</td></tr>";
+      }).join("");
+      var month = manilaPeriod();
+      shell("<section class=\"panel\"><h1>Billing</h1>" +
+        "<div class=\"toolbar\"><button type=\"button\" class=\"btn\" id=\"generate-bills\">Generate bills for</button><input id=\"generate-period\" type=\"month\" value=\"" + month + "\"></div>" +
+        "<form id=\"add-bill\" class=\"grid two\">" +
+        "<div class=\"field\"><label for=\"bill-customer\">Customer</label><select id=\"bill-customer\" required><option value=\"\">Select</option>" + customerChoices() + "</select></div>" +
+        "<div class=\"field\"><label for=\"bill-period\">Period</label><input id=\"bill-period\" type=\"month\" required value=\"" + month + "\"></div>" +
+        "<div class=\"field\"><label for=\"bill-amount\">Amount</label><input id=\"bill-amount\" type=\"number\" min=\"0\" step=\"0.01\" required></div>" +
+        "<div class=\"field\"><label for=\"bill-due\">Due date</label><input id=\"bill-due\" type=\"date\"></div>" +
+        "<button class=\"btn\" type=\"submit\">Add bill</button></form></section>" +
+        "<div class=\"filters\"><input id=\"bill-q\" placeholder=\"Search name or account\"><select id=\"bill-status\"><option value=\"\">All statuses</option><option>unpaid</option><option>pending</option><option>paid</option><option>void</option></select>" +
+        "<select id=\"bill-period-filter\"><option value=\"\">All periods</option>" + periods.map(function (period) { return "<option>" + esc(period) + "</option>"; }).join("") + "</select></div>" +
+        "<table id=\"bill-table\"><thead><tr><th>Customer</th><th>Period</th><th>Amount</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>" + body + "</tbody></table>");
+      document.getElementById("bill-customer").onchange = function (event) {
+        var row = state.customers.filter(function (item) { return item.id === event.target.value; })[0];
+        if (row) document.getElementById("bill-amount").value = row.monthly_bill || row.price || "";
+      };
+      document.getElementById("add-bill").onsubmit = function (event) {
+        event.preventDefault();
+        db.from("invoices").insert({
+          customer_id: document.getElementById("bill-customer").value,
+          period: document.getElementById("bill-period").value,
+          amount: Number(document.getElementById("bill-amount").value),
+          due_date: document.getElementById("bill-due").value || null,
+          status: "unpaid",
+          created_by: sessionEmail
+        }).then(function (insert) {
+          if (insert.error) return flash(errText(insert.error));
+          flash("Bill added.", true);
+          renderBilling();
+        });
+      };
+      document.getElementById("generate-bills").onclick = function () {
+        db.rpc("generate_invoices", { p_period: document.getElementById("generate-period").value }).then(function (rpc) {
+          if (rpc.error) return flash(errText(rpc.error));
+          flash("Generated " + (rpc.data || 0) + " bill(s).", true);
+          renderBilling();
+        });
+      };
+      function filterBills() {
+        var q = document.getElementById("bill-q").value.trim().toLowerCase();
+        var status = document.getElementById("bill-status").value;
+        var period = document.getElementById("bill-period-filter").value;
+        app.querySelectorAll("#bill-table tbody tr").forEach(function (row) {
+          var show = (!q || row.getAttribute("data-search").indexOf(q) !== -1) &&
+            (!status || row.getAttribute("data-status") === status) &&
+            (!period || row.getAttribute("data-period") === period);
+          row.hidden = !show;
+        });
+      }
+      ["bill-q", "bill-status", "bill-period-filter"].forEach(function (id) {
+        document.getElementById(id).addEventListener("input", filterBills);
+        document.getElementById(id).addEventListener("change", filterBills);
+      });
+      app.querySelectorAll("[data-void]").forEach(function (button) {
+        button.onclick = function () {
+          db.from("invoices").update({ status: "void" }).eq("id", button.getAttribute("data-void")).then(function (update) {
+            if (update.error) return flash(errText(update.error));
+            renderBilling();
+          });
+        };
+      });
+    });
+  }
+
+  function proofThumb(path, target) {
+    if (!path) return;
+    db.storage.from("payment-proofs").createSignedUrl(path, 3600).then(function (signed) {
+      var el = document.getElementById(target);
+      if (!el || !signed.data || !signed.data.signedUrl) return;
+      el.innerHTML = "<a href=\"" + esc(signed.data.signedUrl) + "\" target=\"_blank\" rel=\"noopener\"><img class=\"id-thumb\" alt=\"Payment proof\" src=\"" + esc(signed.data.signedUrl) + "\"></a>";
+    });
+  }
+
+  function renderPayments() {
+    var gen = viewGen;
+    shell("<section class=\"panel\"><h1>Payments</h1><p class=\"muted\">Loading…</p></section>");
+    db.from("payments").select("*, customers(name, account_number), invoices(period)").order("submitted_at", { ascending: false }).then(function (result) {
+      if (result.error) return flash(errText(result.error));
+      if (gen !== viewGen) return;
+      var rows = result.data || [];
+      var pending = rows.filter(function (row) { return row.status === "pending"; });
+      var confirmed = rows.filter(function (row) { return row.status === "confirmed"; });
+      function paymentCard(row, actions) {
+        var person = row.customers || {};
+        var bill = row.invoices || {};
+        return "<article class=\"row-card\" data-payment=\"" + row.id + "\"><strong>" + esc(person.name || "Customer") + "</strong>" +
+          "<p class=\"meta\">" + esc(person.account_number || "") + " · " + esc(bill.period || "") + " · " + esc(money(row.amount)) + " · " + esc(row.method) + "</p>" +
+          "<p>Ref " + esc(row.reference_no || "—") + " · " + esc(manilaTime(row.submitted_at)) + "</p>" +
+          "<div id=\"proof-" + row.id + "\"></div>" + (actions || "") + "</article>";
+      }
+      shell("<section class=\"panel\"><h1>Payments</h1><div class=\"tabs\"><button type=\"button\" id=\"tab-pending\" class=\"active\">Pending</button><button type=\"button\" id=\"tab-confirmed\">Confirmed</button></div>" +
+        "<div id=\"pending-list\" class=\"list\">" + (pending.map(function (row) {
+          return paymentCard(row, "<div class=\"actions\"><button type=\"button\" class=\"btn\" data-confirm=\"" + row.id + "\">Confirm</button><button type=\"button\" class=\"btn secondary\" data-reject=\"" + row.id + "\">Reject</button></div>");
+        }).join("") || "<p>No pending payments.</p>") + "</div>" +
+        "<div id=\"confirmed-list\" class=\"list\" hidden>" + (confirmed.map(function (row) { return paymentCard(row); }).join("") || "<p>No confirmed payments yet.</p>") + "</div>" +
+        "<h2>Record cash payment</h2><form id=\"cash-form\" class=\"grid two\">" +
+        "<div class=\"field\"><label>Customer</label><select id=\"cash-customer\" required><option value=\"\">Select</option>" + customerChoices() + "</select></div>" +
+        "<div class=\"field\"><label>Invoice</label><select id=\"cash-invoice\" required><option value=\"\">Select customer first</option></select></div>" +
+        "<div class=\"field\"><label>Amount</label><input id=\"cash-amount\" type=\"number\" min=\"0.01\" step=\"0.01\" required></div>" +
+        "<div class=\"field\"><label>Reference</label><input id=\"cash-ref\" required value=\"CASH\"></div>" +
+        "<button class=\"btn\" type=\"submit\">Record cash payment</button></form></section>");
+      pending.concat(confirmed).forEach(function (row) { if (row.proof_path) proofThumb(row.proof_path, "proof-" + row.id); });
+      document.getElementById("tab-pending").onclick = function () {
+        document.getElementById("pending-list").hidden = false;
+        document.getElementById("confirmed-list").hidden = true;
+        document.getElementById("tab-pending").classList.add("active");
+        document.getElementById("tab-confirmed").classList.remove("active");
+      };
+      document.getElementById("tab-confirmed").onclick = function () {
+        document.getElementById("pending-list").hidden = true;
+        document.getElementById("confirmed-list").hidden = false;
+        document.getElementById("tab-confirmed").classList.add("active");
+        document.getElementById("tab-pending").classList.remove("active");
+      };
+      app.querySelectorAll("[data-confirm], [data-reject]").forEach(function (button) {
+        button.onclick = function () {
+          var confirming = button.hasAttribute("data-confirm");
+          var id = button.getAttribute(confirming ? "data-confirm" : "data-reject");
+          db.from("payments").update({
+            status: confirming ? "confirmed" : "rejected",
+            confirmed_by: sessionEmail,
+            confirmed_at: new Date().toISOString()
+          }).eq("id", id).then(function (update) {
+            if (update.error) return flash(errText(update.error));
+            renderPayments();
+          });
+        };
+      });
+      document.getElementById("cash-customer").onchange = function (event) {
+        db.from("invoices").select("id, period, amount, status").eq("customer_id", event.target.value).in("status", ["unpaid", "pending"]).then(function (bills) {
+          var select = document.getElementById("cash-invoice");
+          select.innerHTML = (bills.data || []).map(function (bill) {
+            return "<option value=\"" + bill.id + "\" data-amount=\"" + bill.amount + "\">" + esc(bill.period) + " · " + esc(money(bill.amount)) + "</option>";
+          }).join("") || "<option value=\"\">No open bill</option>";
+          var first = select.options[0];
+          if (first && first.getAttribute("data-amount")) document.getElementById("cash-amount").value = first.getAttribute("data-amount");
+        });
+      };
+      document.getElementById("cash-invoice").onchange = function (event) {
+        var option = event.target.options[event.target.selectedIndex];
+        var amount = option && option.getAttribute("data-amount");
+        if (amount) document.getElementById("cash-amount").value = amount;
+      };
+      document.getElementById("cash-form").onsubmit = function (event) {
+        event.preventDefault();
+        db.from("payments").insert({
+          customer_id: document.getElementById("cash-customer").value,
+          invoice_id: document.getElementById("cash-invoice").value,
+          amount: Number(document.getElementById("cash-amount").value),
+          method: "cash",
+          reference_no: document.getElementById("cash-ref").value.trim(),
+          status: "confirmed",
+          source: "admin",
+          confirmed_by: sessionEmail,
+          confirmed_at: new Date().toISOString()
+        }).then(function (insert) {
+          if (insert.error) return flash(errText(insert.error));
+          flash("Cash payment recorded.", true);
+          renderPayments();
+        });
+      };
+    });
+  }
+
+  var NODE_COLORS = { OLT: "#FF0000", LCP: "#B87333", NAP: "#2C2F33", CLOSURE: "#6B6F76", POLE: "#D4A574", OTHER: "#111" };
+  var STAGE_COLORS = { inquiry: "#6B6F76", in_progress: "#B87333", encoded: "#D4A574", active: "#FF0000" };
+
+  function osmTiles() {
+    return L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors"
+    });
+  }
+
+  function renderMap() {
+    var gen = viewGen;
+    shell("<section class=\"panel\"><h1>Network map</h1><div id=\"ops-map\" class=\"ops-map\"></div>" +
+      "<div class=\"legend\" id=\"map-legend\"></div>" +
+      "<form id=\"node-form\" class=\"grid two\" hidden>" +
+      "<input type=\"hidden\" id=\"node-id\"><input type=\"hidden\" id=\"node-lat\"><input type=\"hidden\" id=\"node-lng\">" +
+      "<div class=\"field\"><label>Type</label><select id=\"node-type\"><option>OLT</option><option>LCP</option><option>NAP</option><option>CLOSURE</option><option>POLE</option><option>OTHER</option></select></div>" +
+      "<div class=\"field\"><label>Name</label><input id=\"node-name\" required></div>" +
+      "<div class=\"field\"><label>Ports</label><input id=\"node-ports\" type=\"number\" min=\"0\" step=\"1\"></div>" +
+      "<div class=\"field\"><label>Notes</label><input id=\"node-notes\"></div>" +
+      "<div class=\"actions\"><button class=\"btn\" type=\"submit\">Save node</button><button class=\"btn secondary\" type=\"button\" id=\"node-cancel\">Cancel</button></div></form>" +
+      "<p><button type=\"button\" class=\"btn secondary\" id=\"add-node\">Add node</button></p>" +
+      "<div id=\"node-list\"></div></section>");
+    if (!window.L) {
+      flash("Map library did not load.");
+      return;
+    }
+    var map = L.map("ops-map").setView([14.711, 121.110], 14);
+    osmTiles().addTo(map);
+    var adding = false;
+    var editing = null;
+    document.getElementById("add-node").onclick = function () {
+      adding = true;
+      this.textContent = "Click the map…";
+    };
+    document.getElementById("node-cancel").onclick = function () {
+      document.getElementById("node-form").hidden = true;
+      adding = false;
+    };
+    map.on("click", function (event) {
+      if (!adding) return;
+      document.getElementById("node-id").value = "";
+      document.getElementById("node-lat").value = event.latlng.lat;
+      document.getElementById("node-lng").value = event.latlng.lng;
+      document.getElementById("node-form").hidden = false;
+      adding = false;
+      document.getElementById("add-node").textContent = "Add node";
+    });
+    Promise.all([
+      db.from("network_nodes").select("*"),
+      db.from("customers").select("id, name, account_number, stage, latitude, longitude")
+    ]).then(function (parts) {
+      if (gen !== viewGen) return;
+      if (parts[0].error) throw parts[0].error;
+      var nodes = parts[0].data || [];
+      var legend = "";
+      Object.keys(NODE_COLORS).forEach(function (type) {
+        legend += "<span class=\"legend-item\"><i style=\"background:" + NODE_COLORS[type] + "\"></i>" + type + "</span>";
+      });
+      STAGES.forEach(function (stage) {
+        legend += "<span class=\"legend-item\"><i style=\"background:" + (STAGE_COLORS[stage.id] || "#6B6F76") + "\"></i>" + esc(stage.label) + "</span>";
+      });
+      document.getElementById("map-legend").innerHTML = legend;
+      nodes.forEach(function (node) {
+        var marker = L.circleMarker([node.latitude, node.longitude], {
+          radius: 8, color: NODE_COLORS[node.node_type] || "#111", fillOpacity: 0.9
+        }).addTo(map);
+        marker.bindPopup("<strong>" + esc(node.node_type) + "</strong> " + esc(node.name) +
+          "<br><button type=\"button\" class=\"btn secondary\" id=\"edit-" + node.id + "\">Edit</button>");
+        marker.on("popupopen", function () {
+          var button = document.getElementById("edit-" + node.id);
+          if (!button) return;
+          button.onclick = function () {
+            editing = node;
+            document.getElementById("node-id").value = node.id;
+            document.getElementById("node-type").value = node.node_type;
+            document.getElementById("node-name").value = node.name;
+            document.getElementById("node-ports").value = node.ports || "";
+            document.getElementById("node-notes").value = node.notes || "";
+            document.getElementById("node-lat").value = node.latitude;
+            document.getElementById("node-lng").value = node.longitude;
+            document.getElementById("node-form").hidden = false;
+          };
+        });
+      });
+      (parts[1].data || []).forEach(function (row) {
+        if (row.latitude == null || row.longitude == null) return;
+        L.circleMarker([row.latitude, row.longitude], {
+          radius: 6, color: STAGE_COLORS[row.stage] || "#6B6F76", fillOpacity: 0.85
+        }).addTo(map).bindPopup("<a href=\"#customer/" + row.id + "\">" + esc(row.name || row.account_number || "Customer") + "</a><br>" + esc(stageLabel(row.stage)));
+      });
+      function fillNodeForm(node) {
+        document.getElementById("node-id").value = node ? node.id : "";
+        document.getElementById("node-type").value = node ? node.node_type : "NAP";
+        document.getElementById("node-name").value = node ? node.name : "";
+        document.getElementById("node-ports").value = node && node.ports != null ? node.ports : "";
+        document.getElementById("node-notes").value = node && node.notes ? node.notes : "";
+        document.getElementById("node-lat").value = node ? node.latitude : "";
+        document.getElementById("node-lng").value = node ? node.longitude : "";
+        document.getElementById("node-form").hidden = false;
+      }
+      document.getElementById("node-list").innerHTML = nodes.map(function (node) {
+        return "<p>" + esc(node.node_type) + " · " + esc(node.name) +
+          " <button type=\"button\" class=\"btn secondary\" data-edit-node=\"" + node.id + "\">Edit</button>" +
+          " <button type=\"button\" class=\"btn secondary\" data-del-node=\"" + node.id + "\">Delete</button></p>";
+      }).join("");
+      app.querySelectorAll("[data-edit-node]").forEach(function (button) {
+        button.onclick = function () {
+          var node = nodes.filter(function (item) { return item.id === button.getAttribute("data-edit-node"); })[0];
+          if (node) {
+            fillNodeForm(node);
+            map.panTo([node.latitude, node.longitude]);
+          }
+        };
+      });
+      app.querySelectorAll("[data-del-node]").forEach(function (button) {
+        button.onclick = function () {
+          db.from("network_nodes").delete().eq("id", button.getAttribute("data-del-node")).then(function (del) {
+            if (del.error) return flash(errText(del.error));
+            renderMap();
+          });
+        };
+      });
+      setTimeout(function () { map.invalidateSize(); }, 200);
+    }).catch(function (error) { flash(errText(error)); });
+    document.getElementById("node-form").onsubmit = function (event) {
+      event.preventDefault();
+      var record = {
+        node_type: document.getElementById("node-type").value,
+        name: document.getElementById("node-name").value.trim(),
+        ports: document.getElementById("node-ports").value === "" ? null : Number(document.getElementById("node-ports").value),
+        notes: document.getElementById("node-notes").value.trim() || null,
+        latitude: Number(document.getElementById("node-lat").value),
+        longitude: Number(document.getElementById("node-lng").value)
+      };
+      var id = document.getElementById("node-id").value;
+      var query = id ? db.from("network_nodes").update(record).eq("id", id) : db.from("network_nodes").insert(record);
+      query.then(function (save) {
+        if (save.error) return flash(errText(save.error));
+        renderMap();
+      });
+    };
+  }
+
+  function renderRepairs() {
+    var gen = viewGen;
+    shell("<section class=\"panel\"><h1>Repairs</h1><p class=\"muted\">Loading…</p></section>");
+    db.from("repair_tickets").select("*, customers(name, account_number), technicians(name)").order("created_at", { ascending: false }).then(function (result) {
+      if (result.error) return flash(errText(result.error));
+      if (gen !== viewGen) return;
+      var rows = result.data || [];
+      var titles = { pending: "Pending", ongoing: "Ongoing", resolved: "Resolved" };
+      var columns = ["pending", "ongoing", "resolved"].map(function (status) {
+        var cards = rows.filter(function (row) { return row.status === status; }).map(function (row) {
+          var person = row.customers || {};
+          var next = status === "pending" ? "ongoing" : (status === "ongoing" ? "resolved" : "");
+          var prev = status === "resolved" ? "ongoing" : (status === "ongoing" ? "pending" : "");
+          return "<article class=\"row-card\"><strong>" + esc(row.title) + "</strong><p class=\"meta\">" +
+            esc(person.name || "No customer") + " · " + esc(row.priority) + (row.technicians ? " · " + esc(row.technicians.name) : "") + "</p>" +
+            "<p>" + esc(row.description || "") + "</p>" +
+            "<div class=\"actions\">" +
+            (prev ? "<button type=\"button\" class=\"btn secondary\" data-repair=\"" + row.id + "\" data-status=\"" + prev + "\">Move to " + titles[prev] + "</button>" : "") +
+            (next ? "<button type=\"button\" class=\"btn\" data-repair=\"" + row.id + "\" data-status=\"" + next + "\">Move to " + titles[next] + "</button>" : "") +
+            "</div></article>";
+        }).join("");
+        return "<div class=\"kanban-col\"><h2>" + titles[status] + "</h2>" + (cards || "<p class=\"muted\">None</p>") + "</div>";
+      }).join("");
+      shell("<section class=\"panel\"><h1>Repairs</h1><form id=\"repair-form\" class=\"grid two\">" +
+        "<div class=\"field\"><label>Customer</label><select id=\"repair-customer\"><option value=\"\">None</option>" + customerChoices() + "</select></div>" +
+        "<div class=\"field\"><label>Technician</label><select id=\"repair-tech\"><option value=\"\">None</option>" + state.technicians.filter(function (tech) { return tech.active; }).map(function (tech) {
+          return "<option value=\"" + tech.id + "\">" + esc(tech.name) + "</option>";
+        }).join("") + "</select></div>" +
+        "<div class=\"field\"><label>Title</label><input id=\"repair-title\" required></div>" +
+        "<div class=\"field\"><label>Priority</label><select id=\"repair-priority\"><option>low</option><option selected>normal</option><option>high</option></select></div>" +
+        "<div class=\"field\"><label>Description</label><textarea id=\"repair-desc\"></textarea></div>" +
+        "<button class=\"btn\" type=\"submit\">Create ticket</button></form></section><div class=\"kanban\">" + columns + "</div>");
+      document.getElementById("repair-form").onsubmit = function (event) {
+        event.preventDefault();
+        db.from("repair_tickets").insert({
+          customer_id: document.getElementById("repair-customer").value || null,
+          technician_id: document.getElementById("repair-tech").value || null,
+          title: document.getElementById("repair-title").value.trim(),
+          description: document.getElementById("repair-desc").value.trim() || null,
+          priority: document.getElementById("repair-priority").value,
+          created_by: sessionEmail
+        }).then(function (insert) {
+          if (insert.error) return flash(errText(insert.error));
+          renderRepairs();
+        });
+      };
+      app.querySelectorAll("[data-repair]").forEach(function (button) {
+        button.onclick = function () {
+          var status = button.getAttribute("data-status");
+          var patch = { status: status, resolved_at: status === "resolved" ? new Date().toISOString() : null };
+          db.from("repair_tickets").update(patch).eq("id", button.getAttribute("data-repair")).then(function (update) {
+            if (update.error) return flash(errText(update.error));
+            renderRepairs();
+          });
+        };
+      });
+    });
+  }
+
+  function renderSettings() {
+    var gen = viewGen;
+    shell("<section class=\"panel\"><h1>Settings</h1><p class=\"muted\">Loading…</p></section>");
+    db.from("app_settings").select("*").order("key").then(function (result) {
+      if (result.error) return flash(errText(result.error));
+      if (gen !== viewGen) return;
+      var fields = [
+        ["gcash_number", "GCash number"],
+        ["gcash_name", "GCash name"],
+        ["gcash_qr_url", "GCash QR image URL"],
+        ["payment_note", "Payment note"]
+      ];
+      var values = {};
+      (result.data || []).forEach(function (row) { values[row.key] = row.value || ""; });
+      shell("<section class=\"panel\"><h1>Settings</h1><form id=\"settings-form\" class=\"grid\">" +
+        fields.map(function (field) {
+          var input = field[0] === "payment_note"
+            ? "<textarea id=\"set-" + field[0] + "\">" + esc(values[field[0]] || "") + "</textarea>"
+            : "<input id=\"set-" + field[0] + "\" value=\"" + esc(values[field[0]] || "") + "\">";
+          return "<div class=\"field\"><label for=\"set-" + field[0] + "\">" + esc(field[1]) + "</label>" + input + "</div>";
+        }).join("") +
+        "<button class=\"btn\" type=\"submit\">Save settings</button></form></section>");
+      document.getElementById("settings-form").onsubmit = function (event) {
+        event.preventDefault();
+        var writes = fields.map(function (field) {
+          return db.from("app_settings").upsert({
+            key: field[0],
+            value: document.getElementById("set-" + field[0]).value,
+            is_public: true,
+            updated_at: new Date().toISOString()
+          });
+        });
+        Promise.all(writes).then(function (saved) {
+          var failed = saved.filter(function (item) { return item.error; })[0];
+          if (failed) return flash(errText(failed.error));
+          flash("Settings saved.", true);
+        });
+      };
+    });
+  }
+
+  function billsCard(customer) {
+    var rows = (state.invoices || []).map(function (bill) {
+      return "<li>" + esc(bill.period) + " · " + esc(money(bill.amount)) + " · " + esc(bill.status) + "</li>";
+    }).join("");
+    var pays = (state.pays || []).map(function (pay) {
+      return "<li>" + esc(money(pay.amount)) + " · " + esc(pay.method) + " · " + esc(pay.status) + " · " + esc(pay.reference_no || "") + "</li>";
+    }).join("");
+    var month = manilaPeriod();
+    return formCard("Bills & payments",
+      "<ul class=\"history\">" + (rows || "<li>No bills yet.</li>") + "</ul>" +
+      "<h3>Payments</h3><ul class=\"history\">" + (pays || "<li>No payments yet.</li>") + "</ul>" +
+      "<form id=\"quick-bill\" class=\"grid two\">" +
+      "<div class=\"field\"><label for=\"quick-period\">Period</label><input id=\"quick-period\" type=\"month\" value=\"" + month + "\" required></div>" +
+      "<div class=\"field\"><label for=\"quick-amount\">Amount</label><input id=\"quick-amount\" type=\"number\" min=\"0\" step=\"0.01\" value=\"" + esc(customer.monthly_bill || customer.price || "") + "\"></div>" +
+      "<div class=\"field\"><label for=\"quick-due\">Due date</label><input id=\"quick-due\" type=\"date\"></div>" +
+      "<button class=\"btn\" type=\"submit\">Add bill</button></form>");
+  }
+
+  function wireQuickBill(customer) {
+    var form = document.getElementById("quick-bill");
+    if (!form || !customer || !customer.id) return;
+    form.onsubmit = function (event) {
+      event.preventDefault();
+      db.from("invoices").insert({
+        customer_id: customer.id,
+        period: document.getElementById("quick-period").value,
+        amount: Number(document.getElementById("quick-amount").value),
+        due_date: document.getElementById("quick-due").value || null,
+        status: "unpaid",
+        created_by: sessionEmail
+      }).then(function (insert) {
+        if (insert.error) return flash(errText(insert.error));
+        flash("Bill added.", true);
+        loadCustomer(customer.id);
+      });
+    };
+  }
+
+  function initCustomerMiniMap() {
+    var el = document.getElementById("customer-mini-map");
+    if (!el || !window.L) return;
+    var latInput = document.getElementById("f-latitude");
+    var lngInput = document.getElementById("f-longitude");
+    var lat = parseFloat(latInput && latInput.value) || 14.711;
+    var lng = parseFloat(lngInput && lngInput.value) || 121.110;
+    var map = L.map(el).setView([lat, lng], 16);
+    osmTiles().addTo(map);
+    var marker = L.circleMarker([lat, lng], { radius: 8, color: "#FF0000", fillColor: "#FF0000", fillOpacity: 0.9 }).addTo(map);
+    var picking = false;
+    var button = document.getElementById("pick-map");
+    if (button) button.onclick = function () {
+      picking = true;
+      button.textContent = "Click the map…";
+    };
+    map.on("click", function (event) {
+      if (!picking) return;
+      if (latInput) latInput.value = event.latlng.lat.toFixed(6);
+      if (lngInput) lngInput.value = event.latlng.lng.toFixed(6);
+      marker.setLatLng(event.latlng);
+      picking = false;
+      if (button) button.textContent = "Pick on map";
+    });
+    setTimeout(function () { map.invalidateSize(); }, 250);
+  }
+
   function render() {
+    viewGen += 1;
     var current = route();
     if (current.name === "customer" && current.id === "new") {
       renderCustomer({ stage: "inquiry", source: "admin", for_disconnection: false }, true);
@@ -995,7 +1624,13 @@
     if (current.name === "technicians") return renderPeople("technicians");
     if (current.name === "tickets") return renderTickets();
     if (current.name === "admins") return renderAdmins();
-    renderCustomers();
+    if (current.name === "billing") return renderBilling();
+    if (current.name === "payments") return renderPayments();
+    if (current.name === "map") return renderMap();
+    if (current.name === "repairs") return renderRepairs();
+    if (current.name === "settings") return renderSettings();
+    if (current.name === "customers") return renderCustomers();
+    return renderDashboard();
   }
 
   var bootedFor = "";

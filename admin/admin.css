@@ -12,6 +12,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   margin: 0;
   font-family: var(--font);
@@ -385,3 +386,43 @@ th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; colo
   padding: 0.65rem 0;
 }
 .peso { color: var(--gray); font-weight: 700; }
+
+.stat-grid, .chart-grid, .kanban {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+}
+.stat-card {
+  background: #fff;
+  border: 1px solid var(--gray-light);
+  border-radius: 14px;
+  padding: 0.85rem 1rem;
+}
+.stat-card span { display: block; color: var(--gray); font-size: 0.82rem; font-weight: 700; }
+.stat-card strong { display: block; margin-top: 0.2rem; font-size: 1.35rem; }
+.chart { width: 100%; height: auto; display: block; }
+.chart.pie { width: 160px; }
+.legend { display: flex; flex-wrap: wrap; gap: 0.45rem 0.8rem; margin: 0.6rem 0; }
+.legend-item { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; font-weight: 700; }
+.legend-item i { width: 0.75rem; height: 0.75rem; border-radius: 999px; display: inline-block; }
+.ops-map { height: min(70vh, 520px); border-radius: 12px; border: 1px solid var(--gray-light); }
+.mini-map { height: 240px; border-radius: 12px; border: 1px solid var(--gray-light); margin-bottom: 0.8rem; }
+.leaflet-top, .leaflet-bottom { z-index: 5; }
+.kanban-col {
+  background: #fff;
+  border: 1px solid var(--gray-light);
+  border-radius: 14px;
+  padding: 0.75rem;
+  min-width: 0;
+}
+.kanban-col h2 { margin: 0 0 0.6rem; font-size: 1rem; text-transform: capitalize; }
+.kanban-col .row-card { margin-bottom: 0.55rem; cursor: default; }
+.tabs button.active { border-color: #FF0000; box-shadow: inset 0 0 0 1px #FF0000; }
+@media (min-width: 720px) {
+  .stat-grid { grid-template-columns: repeat(3, 1fr); }
+  .chart-grid { grid-template-columns: 1.2fr 0.8fr; }
+  .kanban { grid-template-columns: repeat(3, 1fr); align-items: start; }
+}
+@media (max-width: 719px) {
+  .kanban { grid-auto-flow: column; grid-auto-columns: minmax(240px, 80vw); overflow-x: auto; }
+}
