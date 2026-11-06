@@ -17,10 +17,10 @@
       ["last_name", "Last name", "text"],
       ["middle_initial", "M.I", "text"],
       ["birth_date", "Date of birth", "date"],
-      ["messenger", "Messenger", "text"],
       ["contact_number", "Contact number", "text"],
       ["mobile", "Mobile", "text"],
       ["facebook_name", "Facebook name", "text"],
+      ["messenger", "Messenger inbox link", "text"],
       ["email_address", "Email address", "email"],
       ["email", "Inquiry email", "email"]
     ]},
@@ -377,7 +377,7 @@
 
   function renderSignedOut() {
     who.innerHTML = "";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106t\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106t\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106u\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106u\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -487,6 +487,14 @@
       });
       if (sawMatchHeader || sawOtherHeader) options += "</optgroup>";
       return "<div class=\"field\"><label for=\"" + id + "\">" + esc(label) + "</label><select id=\"" + id + "\" data-key=\"" + key + "\" data-type=\"investor\">" + options + "</select><span class=\"muted\">Matching area is listed first. Any active investor can be chosen.</span></div>";
+    }
+    if (key === "facebook_name") {
+      var inbox = customer.messenger && String(customer.messenger).trim().indexOf("http") === 0 ? String(customer.messenger).trim() : "";
+      return "<div class=\"field\"><label for=\"" + id + "\">" + esc(label) + "</label>" +
+        "<div class=\"name-with-action\">" +
+        "<input id=\"" + id + "\" data-key=\"facebook_name\" data-type=\"text\" type=\"text\" value=\"" + esc(value || "") + "\">" +
+        "<a id=\"messenger-open\" class=\"btn secondary messenger-open\" href=\"" + esc(inbox || "#") + "\" target=\"_blank\" rel=\"noopener\"" + (inbox ? "" : " hidden") + ">Open Messenger inbox</a>" +
+        "</div></div>";
     }
     var control = "";
     if (type === "textarea") {
@@ -739,6 +747,19 @@
     var pppoeInput = document.getElementById("f-pppoe");
     if (pppoeInput && generatedPppoe && pppoeInput.value.trim().toUpperCase() === generatedPppoe) lastAutoPppoe = generatedPppoe;
     if (!isNew && customer.valid_id_path) loadValidIdPhoto(customer.valid_id_path);
+    var messengerInput = document.getElementById("f-messenger");
+    var messengerOpen = document.getElementById("messenger-open");
+    if (messengerInput && messengerOpen) {
+      messengerInput.addEventListener("input", function () {
+        var link = messengerInput.value.trim();
+        if (link.indexOf("http") === 0) {
+          messengerOpen.href = link;
+          messengerOpen.hidden = false;
+        } else {
+          messengerOpen.hidden = true;
+        }
+      });
+    }
     document.getElementById("save-customer").onclick = function () { saveCustomer(customer, isNew); };
     var next = app.querySelector("[data-next]");
     if (next) next.onclick = function () { moveStage(customer, next.getAttribute("data-next")); };

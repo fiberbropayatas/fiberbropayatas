@@ -347,6 +347,15 @@ th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; colo
   align-items: center;
   font-weight: 700;
 }
+.name-with-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.name-with-action input { flex: 1 1 12rem; min-width: 0; }
+.messenger-open { white-space: nowrap; }
+.messenger-open[hidden] { display: none !important; }
 .status-chip {
   display: inline-block;
   border-radius: 999px;

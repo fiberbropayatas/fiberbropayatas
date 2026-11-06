@@ -32,7 +32,7 @@ Built for **Cloudflare Pages** (free): plain HTML, CSS, and vanilla JS. No build
 4. Save and deploy. You’ll get a `*.pages.dev` URL.
 5. (Optional) Attach a custom domain under the Pages project → Custom domains.
 
-CSS and JS are linked with a `?v=` query (`styles.css?v=20261106t`, `main.js?v=20261106t`) in `index.html`, `privacy.html`, and `404.html`. Bump that `v=` value on every CSS or JS change so returning visitors pick up the new files. Images stay long-cached; `/assets/css/*` and `/assets/js/*` use a short `Cache-Control` in `_headers`.
+CSS and JS are linked with a `?v=` query (`styles.css?v=20261106u`, `main.js?v=20261106u`) in `index.html`, `privacy.html`, and `404.html`. Bump that `v=` value on every CSS or JS change so returning visitors pick up the new files. Images stay long-cached; `/assets/css/*` and `/assets/js/*` use a short `Cache-Control` in `_headers`.
 
 ## Inquiry form
 
