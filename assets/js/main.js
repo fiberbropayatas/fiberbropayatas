@@ -1,6 +1,8 @@
 (function () {
   "use strict";
 
+  var formLoadedAt = Date.now();
+
   /* ============================================================
      PLANS CONFIG — edit here when plans/prices change
      Installation fee is one-time ₱1,000 (Nov 2026)
@@ -229,20 +231,44 @@
       });
     }
 
+    var SAVE_ERROR = "We could not save your inquiry. Please try again or message us on Messenger.";
+
     function mirrorInquiry(row) {
-      // Sheet submission must succeed even when Supabase is unconfigured or rejects the insert.
-      try {
-        var cfg = window.FIBERBRO_SUPABASE;
-        if (!cfg || typeof cfg.isConfigured !== "function" || !cfg.isConfigured()) return;
-        import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm")
-          .then(function (mod) {
-            var client = mod.createClient(cfg.url, cfg.anonKey, {
-              auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
-            });
-            return client.from("customers").insert(row, { returning: "minimal" });
-          })
-          .catch(function () {});
-      } catch (ignored) {}
+      var cfg = window.FIBERBRO_SUPABASE;
+      if (!cfg || typeof cfg.isConfigured !== "function" || !cfg.isConfigured()) {
+        return Promise.resolve({ ok: false });
+      }
+      return import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm")
+        .then(function (mod) {
+          var client = mod.createClient(cfg.url, cfg.anonKey, {
+            auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+          });
+          return client.from("customers").insert(row, { returning: "minimal" });
+        })
+        .then(function (result) {
+          if (result && result.error) {
+            console.error("Supabase inquiry insert failed", result.error);
+            return { ok: false };
+          }
+          return { ok: true };
+        })
+        .catch(function (err) {
+          console.error("Supabase inquiry insert failed", err);
+          return { ok: false };
+        });
+    }
+
+    function saveToSheet(payload) {
+      return fetch(INQUIRY_ENDPOINT, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }).then(function (res) {
+        if (!res.ok) throw new Error(SAVE_ERROR);
+        return res.json();
+      }).then(function (body) {
+        if (!body || body.ok !== true) throw new Error(SAVE_ERROR);
+        return { ok: true };
+      });
     }
 
     function finishSuccess() {
@@ -253,16 +279,13 @@
     }
 
     form.addEventListener("submit", function (e) {
-      var gotcha = form.querySelector('[name="_gotcha"]');
-      if (gotcha && gotcha.value) {
-        e.preventDefault();
-        finishSuccess();
-        return;
-      }
-
       if (!window.fetch) return; // native POST to the form action
 
       e.preventDefault();
+      if (Date.now() - formLoadedAt < 2000) {
+        showStatus("error", "Please wait a moment and try again.");
+        return;
+      }
       var file = idInput && idInput.files ? idInput.files[0] : null;
       var fileError = validateIdFile(file);
       if (fileError) {
@@ -324,7 +347,7 @@
           idFile: base64
         };
 
-        mirrorInquiry({
+        var inquiryRow = {
           first_name: firstName,
           last_name: lastName,
           middle_initial: middleInitial || null,
@@ -341,16 +364,19 @@
           referred_by: referredBy || null,
           name: nameParts.join(" "),
           source: "website"
-        });
+        };
 
-        return fetch(INQUIRY_ENDPOINT, {
-          method: "POST",
-          body: JSON.stringify(payload)
-        }).then(function (res) {
-          // Success on HTTP ok, or an opaque/redirect response whose body cannot be read.
-          // Anything else that still resolved is not a network failure.
-          var unreadable = res.type === "opaque" || res.type === "opaqueredirect";
-          if (res.ok || unreadable || res) finishSuccess();
+        return Promise.allSettled([
+          saveToSheet(payload),
+          mirrorInquiry(inquiryRow)
+        ]).then(function (results) {
+          var sheetOk = results[0].status === "fulfilled" && results[0].value && results[0].value.ok === true;
+          var supabaseOk = results[1].status === "fulfilled" && results[1].value && results[1].value.ok === true;
+          if (sheetOk || supabaseOk) {
+            finishSuccess();
+            return;
+          }
+          showStatus("error", SAVE_ERROR);
         });
       })
         .catch(function (err) {
