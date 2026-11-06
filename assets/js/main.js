@@ -368,6 +368,10 @@
       var installDate = fieldValue("installDate");
       var referredBy = fieldValue("referredBy");
       var phoneValue = fieldValue("phone");
+      var planSplit = fieldValue("planSplit");
+      var priceRaw = fieldValue("price");
+      var priceValue = priceRaw === "" ? null : Number(priceRaw);
+      if (priceValue != null && isNaN(priceValue)) priceValue = null;
       var nameParts = [];
       if (firstName) nameParts.push(firstName);
       if (middleInitial) nameParts.push(middleInitial);
@@ -379,6 +383,8 @@
           email: fieldValue("email"),
           phone: "'" + phoneValue,
           plan: selectedPlan(),
+          planSplit: planSplit,
+          price: priceValue,
           message: [
             "Date of Birth: " + birthDate,
             "Facebook Name: " + facebookName,
@@ -387,7 +393,9 @@
             "Valid ID: " + validId,
             "Preferred installation date: " + installDate,
             "Referred by: " + referredBy,
-            "Installation fee acknowledged: " + INSTALLATION_FEE
+            "Installation fee acknowledged: " + INSTALLATION_FEE,
+            "Plan Split: " + planSplit,
+            "Price: " + (priceValue == null ? "" : priceValue)
           ].join("\n"),
           firstName: firstName,
           lastName: lastName,
@@ -417,6 +425,8 @@
           landmark: landmark || null,
           valid_id_type: validId,
           plan: selectedPlan(),
+          plan_split: planSplit || null,
+          price: priceValue,
           preferred_install_date: installDate || null,
           referred_by: referredBy || null,
           name: nameParts.join(" "),

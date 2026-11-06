@@ -138,6 +138,7 @@ create table if not exists public.customers (
   installation_date date,
   installation_remarks text,
   plan_speed text,
+  plan_split text,
   price numeric(12, 2),
   plan_status text,
   investor_id uuid references public.investors (id) on delete restrict,
@@ -521,6 +522,8 @@ grant insert (
   valid_id_type,
   valid_id_path,
   plan,
+  plan_split,
+  price,
   preferred_install_date,
   referred_by,
   name,
@@ -618,6 +621,7 @@ set public = excluded.public,
     allowed_mime_types = excluded.allowed_mime_types;
 
 alter table public.customers add column if not exists valid_id_path text;
+alter table public.customers add column if not exists plan_split text;
 
 drop policy if exists valid_ids_anon_upload on storage.objects;
 create policy valid_ids_anon_upload on storage.objects
