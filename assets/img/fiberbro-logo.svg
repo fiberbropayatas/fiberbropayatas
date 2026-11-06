@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 220" role="img" aria-label="FiberBro Internet Communication Services Corp.">
+  <title>FiberBro Logo</title>
+  <!-- Wordmark: FIBRO with triangle emblem + fiber O -->
+  <g font-family="Arial Black, Arial, Helvetica, sans-serif" font-weight="900">
+    <!-- F -->
+    <text x="28" y="118" font-size="96" fill="#FF0000">F</text>
+
+    <!-- Rounded red triangle emblem (replaces first I / holds IBER) -->
+    <g transform="translate(118, 28)">
+      <path d="M55 8 L102 118 L8 118 Z" fill="#FF0000" stroke="#B87333" stroke-width="6" stroke-linejoin="round"/>
+      <!-- White mountain peaks -->
+      <path d="M28 78 L42 52 L52 68 L62 48 L78 78 Z" fill="#FFFFFF"/>
+      <!-- IBER -->
+      <text x="55" y="108" text-anchor="middle" font-size="22" fill="#FFFFFF" letter-spacing="1">IBER</text>
+    </g>
+
+    <!-- B R -->
+    <text x="236" y="118" font-size="96" fill="#FF0000">BR</text>
+
+    <!-- Fiber-optic cable O -->
+    <g transform="translate(430, 70)">
+      <!-- Outer copper ring -->
+      <circle cx="40" cy="40" r="42" fill="none" stroke="#B87333" stroke-width="7"/>
+      <!-- Gray cable body -->
+      <circle cx="40" cy="40" r="34" fill="none" stroke="#8A8E96" stroke-width="14"/>
+      <!-- Inner copper edge -->
+      <circle cx="40" cy="40" r="24" fill="none" stroke="#B87333" stroke-width="4"/>
+      <!-- Cut end showing fiber strands -->
+      <g transform="translate(68, 18) rotate(35)">
+        <rect x="0" y="0" width="22" height="16" rx="3" fill="#6B6F76" stroke="#B87333" stroke-width="2"/>
+        <circle cx="7" cy="8" r="2.2" fill="#FF0000"/>
+        <circle cx="14" cy="8" r="2.2" fill="#FFFFFF" stroke="#FF0000" stroke-width="0.8"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- Subtitle -->
+  <text x="320" y="188" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="16" font-style="italic" font-weight="700" fill="#FF0000" letter-spacing="1.5">INTERNET COMMUNICATION SERVICES CORP.</text>
+</svg>
