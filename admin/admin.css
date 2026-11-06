@@ -282,7 +282,7 @@ a:hover { color: #FF0000; }
 @media (max-width: 720px) {
   .customer-sticky { top: 3.6rem; }
   .customer-sticky .actions { width: 100%; }
-  .customer-sticky .actions .btn { flex: 1 1 auto; }
+  .customer-sticky .btn { flex: 1 1 auto; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -354,14 +354,8 @@ th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; colo
   gap: 0.5rem;
 }
 .name-with-action input { flex: 1 1 12rem; min-width: 0; }
-.messenger-open {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  white-space: nowrap;
-}
+.messenger-open { white-space: nowrap; }
 .messenger-open[hidden] { display: none !important; }
-.msg-icon { display: block; }
 .status-chip {
   display: inline-block;
   border-radius: 999px;
