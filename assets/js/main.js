@@ -271,6 +271,7 @@
       var validId = fieldValue("validId");
       var installDate = fieldValue("installDate");
       var referredBy = fieldValue("referredBy");
+      var phoneValue = fieldValue("phone");
       var nameParts = [];
       if (firstName) nameParts.push(firstName);
       if (middleInitial) nameParts.push(middleInitial);
@@ -280,7 +281,7 @@
         var payload = {
           name: nameParts.join(" "),
           email: fieldValue("email"),
-          phone: fieldValue("phone"),
+          phone: "'" + phoneValue,
           plan: selectedPlan(),
           message: [
             "Date of Birth: " + birthDate,
