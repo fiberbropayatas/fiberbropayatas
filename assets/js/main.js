@@ -17,8 +17,8 @@
       features: [
         "Fiber connection to your home",
         "Local Payatas support",
-        "Ideal for browsing and light streaming"
-        // TODO(owner): confirm any other inclusions (data cap, devices, SLA) — do NOT claim unlimited data until confirmed
+        "Ideal for browsing and light streaming",
+        "Unlimited data"
       ]
     },
     {
@@ -32,8 +32,8 @@
       features: [
         "Fiber connection to your home",
         "Local Payatas support",
-        "Good for work-from-home and HD streaming"
-        // TODO(owner): confirm any other inclusions — do NOT claim unlimited data until confirmed
+        "Good for work-from-home and HD streaming",
+        "Unlimited data"
       ]
     },
     {
@@ -47,8 +47,8 @@
       features: [
         "Fiber connection to your home",
         "Local Payatas support",
-        "Built for multi-device households"
-        // TODO(owner): confirm any other inclusions — do NOT claim unlimited data until confirmed
+        "Built for multi-device households",
+        "Unlimited data"
       ]
     }
   ];

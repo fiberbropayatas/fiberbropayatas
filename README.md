@@ -19,7 +19,7 @@ Built for **Cloudflare Pages** (free): plain HTML, CSS, and vanilla JS. No build
 
 - Plus is marked **Most Popular**.
 - Installation fee is shown on every plan card, under the plans section, and on the inquiry form (also sent as a hidden form field `installation_fee`).
-- **Do not claim unlimited data** until the owner confirms it. Feature bullets are generic only; edit `assets/js/main.js` → `PLANS`.
+- All three plans include **unlimited data** (no caps). Feature bullets live in `assets/js/main.js` → `PLANS`.
 
 ## Deploy to Cloudflare Pages
 
@@ -70,11 +70,7 @@ HTML uses `<picture>` with WebP + PNG fallback.
 
 Replace the TODO items in the Coverage section of `index.html` with confirmed sitios / streets.
 
-### 5. Facebook link
-
-Replace `href="#"` in the footer (search for `TODO(owner): replace href with real Facebook Page URL`).
-
-### 6. Privacy Notice
+### 5. Privacy Notice
 
 `privacy.html` is a short RA 10173 draft. Have it reviewed before treating it as final. No NPC registration numbers are invented.
 
@@ -92,4 +88,6 @@ Open `http://localhost:8080`.
 ## Contact
 
 - Email: fiberbropayatas@gmail.com
+- Facebook: https://www.facebook.com/721922910999905
+- Messenger: https://m.me/721922910999905
 - Area: Payatas, Quezon City only

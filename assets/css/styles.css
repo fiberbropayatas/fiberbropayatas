@@ -522,6 +522,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 }
 .site-footer a { color: #fff; }
 .site-footer a:hover { color: var(--copper-light); }
+.site-footer .btn-secondary { color: var(--red-deep); }
+.site-footer .btn-secondary:hover { color: var(--red-dark); }
 .footer-grid {
   display: grid;
   gap: 1.5rem;
