@@ -229,6 +229,22 @@
       });
     }
 
+    function mirrorInquiry(row) {
+      // Sheet submission must succeed even when Supabase is unconfigured or rejects the insert.
+      try {
+        var cfg = window.FIBERBRO_SUPABASE;
+        if (!cfg || typeof cfg.isConfigured !== "function" || !cfg.isConfigured()) return;
+        import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm")
+          .then(function (mod) {
+            var client = mod.createClient(cfg.url, cfg.anonKey, {
+              auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+            });
+            return client.from("customers").insert(row, { returning: "minimal" });
+          })
+          .catch(function () {});
+      } catch (ignored) {}
+    }
+
     function finishSuccess() {
       form.reset();
       clearIdPreview();
@@ -307,6 +323,25 @@
           idMimeType: "image/jpeg",
           idFile: base64
         };
+
+        mirrorInquiry({
+          first_name: firstName,
+          last_name: lastName,
+          middle_initial: middleInitial || null,
+          birth_date: birthDate || null,
+          mobile: phoneValue,
+          contact_number: phoneValue,
+          email: fieldValue("email") || null,
+          facebook_name: facebookName || null,
+          address: address,
+          landmark: landmark || null,
+          valid_id_type: validId,
+          plan: selectedPlan(),
+          preferred_install_date: installDate || null,
+          referred_by: referredBy || null,
+          name: nameParts.join(" "),
+          source: "website"
+        });
 
         return fetch(INQUIRY_ENDPOINT, {
           method: "POST",

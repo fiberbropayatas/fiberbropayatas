@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FiberBro admin</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="description" content="Internal FiberBro admin portal.">
+  <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/admin/admin.css?v=20261106g">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">FiberBro <span>Admin</span></div>
+    <div id="who"></div>
+  </header>
+  <main class="wrap" id="app">
+    <section class="panel" id="unconfigured">
+      <h1>Admin portal not configured yet</h1>
+      <p>This page is ready, but it is not connected to a database. Create a free Supabase project, then paste its Project URL and anon public key into <code>admin/config.js</code>.</p>
+      <p class="muted">The setup steps are in <code>admin/SETUP.md</code> in the site repository. The public website keeps working, and inquiries still go to the Google Sheet.</p>
+      <p class="muted" id="config-status"></p>
+    </section>
+  </main>
+  <script src="/admin/config.js?v=20261106g"></script>
+  <script src="/admin/admin.js?v=20261106g"></script>
+</body>
+</html>
