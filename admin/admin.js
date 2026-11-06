@@ -148,9 +148,27 @@
     location.hash = hash;
   }
 
+  function investorLabel(inv) {
+    if (!inv) return "";
+    var code = inv.code ? String(inv.code).trim() : "";
+    if (code) return code + " — " + (inv.name || "");
+    return inv.name || "";
+  }
+
+  function compareInvestors(a, b) {
+    var ac = a.code ? String(a.code).trim().toUpperCase() : "";
+    var bc = b.code ? String(b.code).trim().toUpperCase() : "";
+    if (ac !== bc) {
+      if (!ac) return 1;
+      if (!bc) return -1;
+      return ac.localeCompare(bc);
+    }
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  }
+
   function investorName(id) {
     for (var i = 0; i < state.investors.length; i++) {
-      if (state.investors[i].id === id) return state.investors[i].name;
+      if (state.investors[i].id === id) return investorLabel(state.investors[i]);
     }
     return "";
   }
@@ -178,7 +196,7 @@
       }
       var diff = rank(a) - rank(b);
       if (diff) return diff;
-      return String(a.name).localeCompare(String(b.name));
+      return compareInvestors(a, b);
     });
   }
 
@@ -200,7 +218,7 @@
 
   function renderSignedOut() {
     who.innerHTML = "";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106i\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106i\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106j\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106j\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -300,7 +318,7 @@
           sawOtherHeader = true;
         }
         var suffix = inv.active ? "" : " (inactive)";
-        options += "<option value=\"" + inv.id + "\"" + (inv.id === value ? " selected" : "") + ">" + esc(inv.name + suffix) + "</option>";
+        options += "<option value=\"" + inv.id + "\"" + (inv.id === value ? " selected" : "") + ">" + esc(investorLabel(inv) + suffix) + "</option>";
       });
       if (sawMatchHeader || sawOtherHeader) options += "</optgroup>";
       return "<div class=\"field\"><label for=\"" + id + "\">" + esc(label) + "</label><select id=\"" + id + "\" data-key=\"" + key + "\" data-type=\"investor\">" + options + "</select><span class=\"muted\">Matching area is listed first. Any active investor can be chosen.</span></div>";
@@ -451,16 +469,19 @@
   }
 
   function renderPeople(kind) {
-    var rows = state[kind];
+    var rows = kind === "investors" ? state.investors.slice().sort(compareInvestors) : state[kind];
     var title = kind === "investors" ? "Investors" : "Technicians";
     var body = rows.map(function (row) {
       var extra = kind === "investors" ? esc((row.areas || []).join(", ")) : esc(row.mobile || row.email || "");
-      return "<tr><td data-label=\"Name\">" + esc(row.name) + "</td><td data-label=\"Details\">" + extra + "</td><td data-label=\"Status\">" +
+      var nameCell = kind === "investors" && row.code
+        ? "<span class=\"tag\">" + esc(row.code) + "</span> " + esc(row.name)
+        : esc(row.name);
+      return "<tr><td data-label=\"Name\">" + nameCell + "</td><td data-label=\"Details\">" + extra + "</td><td data-label=\"Status\">" +
         (row.active ? "<span class=\"tag\">Active</span>" : "<span class=\"tag off\">Inactive</span>") +
         "</td><td data-label=\"\"><button type=\"button\" class=\"btn secondary\" data-edit=\"" + row.id + "\">Edit</button></td></tr>";
     }).join("");
     var form = kind === "investors"
-      ? "<input id=\"p-name\" placeholder=\"Name\" required><input id=\"p-areas\" placeholder=\"Areas, comma separated\"><textarea id=\"p-notes\" placeholder=\"Notes\"></textarea>"
+      ? "<input id=\"p-name\" placeholder=\"Name\" required><input id=\"p-code\" class=\"code-input\" placeholder=\"e.g. AN\" maxlength=\"16\" autocapitalize=\"characters\"><input id=\"p-areas\" placeholder=\"Areas, comma separated\"><textarea id=\"p-notes\" placeholder=\"Notes\"></textarea>"
       : "<input id=\"p-name\" placeholder=\"Name\" required><input id=\"p-mobile\" placeholder=\"Mobile\"><input id=\"p-email\" placeholder=\"Email\"><textarea id=\"p-notes\" placeholder=\"Notes\"></textarea>";
     shell(
       "<section class=\"panel\"><h1>" + title + "</h1><form id=\"person-form\" class=\"grid\">" + form +
@@ -479,13 +500,22 @@
       if (!record.name) return flash("Name is required.");
       if (kind === "investors") {
         record.areas = document.getElementById("p-areas").value.split(",").map(function (part) { return part.trim(); }).filter(Boolean);
+        var code = document.getElementById("p-code").value.trim().toUpperCase();
+        record.code = code || null;
       } else {
         record.mobile = document.getElementById("p-mobile").value.trim() || null;
         record.email = document.getElementById("p-email").value.trim() || null;
       }
       var query = id ? db.from(kind).update(record).eq("id", id) : db.from(kind).insert(record);
       query.then(function (result) {
-        if (result.error) return flash(errText(result.error));
+        if (result.error) {
+          var errCode = result.error.code || "";
+          var errBlob = (result.error.message || "") + " " + (result.error.details || "");
+          if (errCode === "23505" || errBlob.indexOf("23505") !== -1 || errBlob.indexOf("investors_code_key") !== -1) {
+            return flash("That investor code is already used.");
+          }
+          return flash(errText(result.error));
+        }
         flash("Saved.", true);
         refresh().then(render);
       });
@@ -499,7 +529,10 @@
         document.getElementById("p-name").value = row.name || "";
         document.getElementById("p-notes").value = row.notes || "";
         document.getElementById("p-active").checked = !!row.active;
-        if (kind === "investors") document.getElementById("p-areas").value = (row.areas || []).join(", ");
+        if (kind === "investors") {
+          document.getElementById("p-areas").value = (row.areas || []).join(", ");
+          document.getElementById("p-code").value = row.code || "";
+        }
         else {
           document.getElementById("p-mobile").value = row.mobile || "";
           document.getElementById("p-email").value = row.email || "";
