@@ -117,6 +117,12 @@
     });
   }
   var who = document.getElementById("who");
+  var sideNav = document.getElementById("side-nav");
+  var pageTitle = document.getElementById("page-title");
+  var navToggle = document.getElementById("nav-toggle");
+  var navScrim = document.getElementById("nav-scrim");
+  var sidebarEl = document.getElementById("sidebar");
+  wireAdminChrome();
   var cfg = window.FIBERBRO_SUPABASE;
   var db = null;
   var sessionEmail = "";
@@ -361,31 +367,139 @@
     });
   }
 
-  function shell(body) {
-    var links = [
-      ["dashboard", "Dashboard"],
-      ["customers", "Customers"],
-      ["billing", "Billing"],
-      ["payments", "Payments"],
-      ["map", "Map"],
-      ["repairs", "Repairs"],
-      ["investors", "Investors"],
-      ["technicians", "Technicians"],
-      ["tickets", "Install tickets"],
-      ["settings", "Settings"],
-      ["admins", "Admins"]
-    ];
+  var NAV_GROUPS = [
+    ["Overview", [["dashboard", "Dashboard", "dashboard"]]],
+    ["Customers", [
+      ["customers", "Customers", "customers"],
+      ["tickets", "Install tickets", "tickets"],
+      ["repairs", "Repairs", "repairs"]
+    ]],
+    ["Billing", [
+      ["billing", "Billing", "billing"],
+      ["payments", "Payments", "payments"]
+    ]],
+    ["Network", [
+      ["map", "Map", "map"],
+      ["investors", "Investors", "investors"],
+      ["technicians", "Technicians", "technicians"]
+    ]],
+    ["System", [
+      ["settings", "Settings", "settings"],
+      ["admins", "Admins", "admins"]
+    ]]
+  ];
+  var PAGE_TITLES = {
+    dashboard: "Dashboard",
+    customers: "Customers",
+    customer: "Customer",
+    billing: "Billing",
+    payments: "Payments",
+    map: "Map",
+    repairs: "Repairs",
+    investors: "Investors",
+    technicians: "Technicians",
+    tickets: "Install tickets",
+    settings: "Settings",
+    admins: "Admins"
+  };
+  var ICON_SHAPES = {
+    dashboard: "<path d=\"M4 11.5 12 4l8 7.5\"/><path d=\"M6 10.5V20h12v-9.5\"/>",
+    customers: "<circle cx=\"9\" cy=\"8\" r=\"3\"/><path d=\"M3.5 19a5.5 5.5 0 0 1 11 0\"/><circle cx=\"17\" cy=\"9\" r=\"2.2\"/><path d=\"M21 19a4 4 0 0 0-4-4\"/>",
+    billing: "<path d=\"M7 3h10v18l-2.5-1.5L12 21l-2.5-1.5L7 21z\"/><path d=\"M9.5 8h5M9.5 12h5\"/>",
+    payments: "<rect x=\"3\" y=\"6\" width=\"18\" height=\"12\" rx=\"2\"/><path d=\"M3 10h18\"/>",
+    map: "<path d=\"M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11z\"/><circle cx=\"12\" cy=\"10\" r=\"1.6\"/>",
+    repairs: "<path d=\"M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4L15 12l-3-3z\"/>",
+    investors: "<rect x=\"4\" y=\"7\" width=\"16\" height=\"12\" rx=\"1.5\"/><path d=\"M8 7V5h8v2\"/>",
+    technicians: "<path d=\"M12 3 19 6v6c0 4.5-3 6.8-7 7.8C8 18.8 5 16.5 5 12V6z\"/>",
+    tickets: "<path d=\"M8 3h8v4H8z\"/><path d=\"M7 7h10v14H7z\"/><path d=\"M9 12h6M9 16h4\"/>",
+    settings: "<path d=\"M4 7h16M4 12h16M4 17h16\"/><circle cx=\"8\" cy=\"7\" r=\"1.3\"/><circle cx=\"16\" cy=\"12\" r=\"1.3\"/><circle cx=\"10\" cy=\"17\" r=\"1.3\"/>",
+    admins: "<path d=\"M12 3 19 6v6c0 4.2-3 6.5-7 7.6C8 18.5 5 16.2 5 12V6z\"/><path d=\"M9 12l2 2 4-4\"/>"
+  };
+  var navPainted = "";
+
+  function iconSvg(name, className) {
+    return "<svg class=\"" + className + "\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\">" + (ICON_SHAPES[name] || "") + "</svg>";
+  }
+
+  function mobileNav() {
+    return window.matchMedia("(max-width: 959px)").matches;
+  }
+
+  function setNavOpen(open) {
+    var show = !!open && mobileNav() && document.body.classList.contains("is-admin");
+    document.body.classList.toggle("nav-open", show);
+    if (navToggle) {
+      navToggle.setAttribute("aria-expanded", show ? "true" : "false");
+      navToggle.setAttribute("aria-label", show ? "Close menu" : "Open menu");
+    }
+    if (navScrim) navScrim.hidden = !show;
+    if (sidebarEl) sidebarEl.inert = !document.body.classList.contains("is-admin") || (mobileNav() && !show);
+    if (show && sideNav) {
+      var first = sideNav.querySelector("a");
+      if (first) first.focus();
+    }
+  }
+
+  function setChrome(mode) {
+    var admin = mode === "admin";
+    document.body.classList.toggle("is-admin", admin);
+    if (!admin) {
+      navPainted = "";
+      if (sideNav) sideNav.innerHTML = "";
+      setNavOpen(false);
+      return;
+    }
+    if (sidebarEl) sidebarEl.inert = mobileNav() && !document.body.classList.contains("nav-open");
+  }
+
+  function wireAdminChrome() {
+    if (navToggle) navToggle.addEventListener("click", function () {
+      setNavOpen(!document.body.classList.contains("nav-open"));
+    });
+    if (navScrim) navScrim.addEventListener("click", function () { setNavOpen(false); });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && document.body.classList.contains("nav-open")) {
+        setNavOpen(false);
+        if (navToggle) navToggle.focus();
+      }
+    });
+    if (sideNav) sideNav.addEventListener("click", function (event) {
+      if (event.target.closest && event.target.closest("a")) setNavOpen(false);
+    });
+    window.addEventListener("resize", function () {
+      if (!mobileNav()) setNavOpen(false);
+    });
+  }
+
+  function paintNav() {
+    if (!sideNav) return;
     var current = route().name;
-    var nav = links.map(function (item) {
-      var cls = item[0] === current || (current === "customer" && item[0] === "customers") ? " class=\"active\"" : "";
-      return "<a href=\"#" + item[0] + "\"" + cls + ">" + item[1] + "</a>";
+    var active = current === "customer" ? "customers" : current;
+    if (navPainted === active && sideNav.childElementCount) return;
+    navPainted = active;
+    sideNav.innerHTML = NAV_GROUPS.map(function (group) {
+      var links = group[1].map(function (item) {
+        var on = item[0] === active;
+        return "<a href=\"#" + item[0] + "\"" + (on ? " class=\"active\" aria-current=\"page\"" : "") + ">" +
+          iconSvg(item[2], "nav-icon") + "<span>" + item[1] + "</span></a>";
+      }).join("");
+      return "<p class=\"nav-label\">" + group[0] + "</p>" + links;
     }).join("");
-    app.innerHTML = "<nav class=\"nav\">" + nav + "</nav><div id=\"flash\" class=\"flash\" hidden></div>" + body;
+  }
+
+  function shell(body) {
+    setChrome("admin");
+    paintNav();
+    var current = route().name;
+    if (pageTitle) pageTitle.textContent = PAGE_TITLES[current] || "Dashboard";
+    app.innerHTML = "<div id=\"flash\" class=\"flash\" role=\"status\" aria-live=\"polite\" hidden></div>" + body;
   }
 
   function renderSignedOut() {
-    who.innerHTML = "";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261106x\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261106x\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    setChrome("guest");
+    if (who) who.innerHTML = "";
+    if (pageTitle) pageTitle.textContent = "Sign in";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261107a\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261107a\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -395,7 +509,9 @@
   }
 
   function renderDenied() {
-    who.innerHTML = "<button type=\"button\" id=\"sign-out\">Sign out</button>";
+    setChrome("guest");
+    if (pageTitle) pageTitle.textContent = "FiberBro";
+    who.innerHTML = "<span class=\"who-email\">" + esc(sessionEmail) + "</span><button type=\"button\" class=\"btn secondary\" id=\"sign-out\">Sign out</button>";
     app.innerHTML = "<section class=\"panel\"><h1>This Google account is not an admin</h1><p>" + esc(sessionEmail) + " can sign in, but it is not on the allowlist. Ask an existing admin to add it under Admins, or add the address in the Supabase <code>admins</code> table.</p></section>";
     document.getElementById("sign-out").onclick = signOut;
   }
@@ -432,7 +548,7 @@
       var title = row.name || ((row.first_name || "") + " " + (row.last_name || "")).trim() || "Unnamed";
       return "<a class=\"row-card\" href=\"#customer/" + row.id + "\"><strong>" + esc(title) + "</strong><span class=\"meta\">" +
         esc(row.area || "No area") + " · " + esc(row.mobile || row.contact_number || "No mobile") + " · " + esc(investorName(row.investor_id) || "No investor") +
-        "</span><div><span class=\"tag\">" + esc(stageLabel(row.stage)) + "</span>" +
+        "</span><div><span class=\"tag tag-" + esc(row.stage) + "\">" + esc(stageLabel(row.stage)) + "</span>" +
         ((row.valid_id_path || row.valid_id_drive_url) ? " <span class=\"tag\">ID</span>" : "") +
         "</div></a>";
     }).join("");
@@ -866,7 +982,7 @@
       "<section class=\"panel\"><h1>" + title + "</h1><form id=\"person-form\" class=\"grid\">" + form +
       "<label class=\"field check\"><input id=\"p-active\" type=\"checkbox\" checked> Active</label>" +
       "<input type=\"hidden\" id=\"p-id\"><div class=\"actions\"><button class=\"btn\" type=\"submit\">Save</button><button class=\"btn secondary\" type=\"button\" id=\"p-clear\">Clear</button></div></form></section>" +
-      "<table><thead><tr><th>Name</th><th>Details</th><th>Status</th><th></th></tr></thead><tbody>" + body + "</tbody></table>"
+      "<div class=\"table-card\"><table><thead><tr><th>Name</th><th>Details</th><th>Status</th><th></th></tr></thead><tbody>" + (body || "<tr><td colspan=\"4\">No records yet.</td></tr>") + "</tbody></table></div>"
     );
     document.getElementById("person-form").onsubmit = function (event) {
       event.preventDefault();
@@ -927,11 +1043,11 @@
       var name = customer ? (customer.name || customer.account_number || "Customer") : ticket.customer_id;
       return "<tr><td data-label=\"Customer\"><a href=\"#customer/" + ticket.customer_id + "\">" + esc(name) + "</a></td><td data-label=\"Stage\">" +
         esc(customer ? stageLabel(customer.stage) : "") + "</td><td data-label=\"Technician\">" + esc(techName(ticket.technician_id) || "Unassigned") +
-        "</td><td data-label=\"Status\">" + esc(ticket.status) + "</td><td data-label=\"Assigned\">" + esc(ticket.assigned_by || "") + "</td></tr>";
+        "</td><td data-label=\"Status\">" + statusPill(ticket.status) + "</td><td data-label=\"Assigned\">" + esc(ticket.assigned_by || "") + "</td></tr>";
     }).join("");
     shell("<section class=\"panel\"><h1>Install tickets</h1><p class=\"muted\">A ticket is created when an admin marks the customer Active. Assigning a technician updates the ticket only.</p></section>" +
-      "<table><thead><tr><th>Customer</th><th>Stage</th><th>Technician</th><th>Status</th><th>Assigned by</th></tr></thead><tbody>" +
-      (body || "<tr><td>No tickets yet.</td></tr>") + "</tbody></table>");
+      "<div class=\"table-card\"><table><thead><tr><th>Customer</th><th>Stage</th><th>Technician</th><th>Status</th><th>Assigned by</th></tr></thead><tbody>" +
+      (body || "<tr><td colspan=\"5\">No tickets yet.</td></tr>") + "</tbody></table></div>");
   }
 
   function renderAdmins() {
@@ -940,7 +1056,7 @@
     }).join("");
     shell("<section class=\"panel\"><h1>Admins</h1><p class=\"muted\">Only these Gmail addresses can use the portal. The check is in the database, not only on this page.</p>" +
       "<form id=\"admin-form\" class=\"toolbar\"><input id=\"admin-email\" type=\"email\" placeholder=\"name@gmail.com\" required><button class=\"btn\" type=\"submit\">Add admin</button></form></section>" +
-      "<table><thead><tr><th>Email</th><th></th></tr></thead><tbody>" + body + "</tbody></table>");
+      "<div class=\"table-card\"><table><thead><tr><th>Email</th><th></th></tr></thead><tbody>" + (body || "<tr><td colspan=\"2\">No admins yet.</td></tr>") + "</tbody></table></div>");
     document.getElementById("admin-form").onsubmit = function (event) {
       event.preventDefault();
       var email = document.getElementById("admin-email").value.trim().toLowerCase();
@@ -1001,6 +1117,19 @@
     }).catch(function (error) { flash(errText(error)); });
   }
 
+  function statusPill(status) {
+    var key = String(status || "").toLowerCase();
+    var known = {
+      unpaid: 1, pending: 1, paid: 1, void: 1,
+      confirmed: 1, rejected: 1,
+      open: 1, assigned: 1, closed: 1,
+      low: 1, normal: 1, high: 1,
+      ongoing: 1, resolved: 1
+    };
+    if (!known[key]) return esc(status || "");
+    return "<span class=\"status-pill status-" + key + "\">" + esc(key) + "</span>";
+  }
+
   function money(amount) {
     var num = Number(amount);
     if (isNaN(num)) return "—";
@@ -1029,22 +1158,23 @@
   function barChart(pairs) {
     var max = 1;
     pairs.forEach(function (pair) { if (pair[1] > max) max = pair[1]; });
-    var width = 320;
-    var rowH = 28;
-    var height = pairs.length * rowH + 8;
+    var width = 360;
+    var rowH = 36;
+    var height = pairs.length * rowH + 4;
     var bars = pairs.map(function (pair, index) {
-      var w = Math.round((pair[1] / max) * 180);
-      var y = 8 + index * rowH;
-      return "<text x=\"0\" y=\"" + (y + 14) + "\" font-size=\"11\">" + esc(pair[0]) + "</text>" +
-        "<rect x=\"110\" y=\"" + y + "\" width=\"" + w + "\" height=\"16\" fill=\"#FF0000\" rx=\"4\"></rect>" +
-        "<text x=\"" + (116 + w) + "\" y=\"" + (y + 13) + "\" font-size=\"11\">" + pair[1] + "</text>";
+      var w = Math.round((pair[1] / max) * 168);
+      var y = 6 + index * rowH;
+      return "<text class=\"chart-label\" x=\"0\" y=\"" + (y + 16) + "\">" + esc(pair[0]) + "</text>" +
+        "<rect x=\"112\" y=\"" + (y + 4) + "\" width=\"168\" height=\"12\" rx=\"6\" fill=\"#EEF0F3\"></rect>" +
+        "<rect x=\"112\" y=\"" + (y + 4) + "\" width=\"" + (pair[1] ? Math.max(w, 8) : 0) + "\" height=\"12\" rx=\"6\" fill=\"#FF0000\"></rect>" +
+        "<text class=\"chart-value\" x=\"292\" y=\"" + (y + 15) + "\">" + pair[1] + "</text>";
     }).join("");
     return "<svg class=\"chart\" viewBox=\"0 0 " + width + " " + height + "\" role=\"img\">" + bars + "</svg>";
   }
 
   function pieChart(pairs) {
     var total = pairs.reduce(function (sum, pair) { return sum + pair[1]; }, 0) || 1;
-    var colors = ["#FF0000", "#B87333", "#2C2F33", "#E8E9EB"];
+    var colors = ["#FF0000", "#B87333", "#5C6370", "#C5C8CE"];
     var angle = -Math.PI / 2;
       var slices = pairs.map(function (pair, index) {
       if (pair[1] === 0) return "";
@@ -1096,17 +1226,17 @@
       var openRepairs = repairs.filter(function (row) { return row.status !== "resolved"; }).length;
       if (gen !== viewGen) return;
       var cards = [
-        ["Customers", customers.length],
-        ["Inquiry", stageCounts.inquiry || 0],
-        ["In Progress", stageCounts.in_progress || 0],
-        ["Encoded", stageCounts.encoded || 0],
-        ["Active", stageCounts.active || 0],
-        ["Unpaid bills", unpaid.length + " · " + money(unpaidTotal)],
-        ["Pending payments", pendingPays],
-        ["Collected this month", money(collected)],
-        ["Open repairs", openRepairs]
+        ["Customers", customers.length, "customers", "red"],
+        ["Inquiry", stageCounts.inquiry || 0, "tickets", "gray"],
+        ["In Progress", stageCounts.in_progress || 0, "repairs", "copper"],
+        ["Encoded", stageCounts.encoded || 0, "settings", "gray"],
+        ["Active", stageCounts.active || 0, "customers", "red"],
+        ["Unpaid bills", unpaid.length + " · " + money(unpaidTotal), "billing", "red"],
+        ["Pending payments", pendingPays, "payments", "copper"],
+        ["Collected this month", money(collected), "payments", "copper"],
+        ["Open repairs", openRepairs, "repairs", "red"]
       ].map(function (card) {
-        return "<article class=\"stat-card\"><span>" + esc(card[0]) + "</span><strong>" + esc(card[1]) + "</strong></article>";
+        return "<article class=\"stat-card\"><span class=\"stat-icon tone-" + card[3] + "\">" + iconSvg(card[2], "stat-svg") + "</span><div><p class=\"stat-label\">" + esc(card[0]) + "</p><p class=\"stat-value\">" + esc(card[1]) + "</p></div></article>";
       }).join("");
       var bars = barChart(STAGES.map(function (stage) { return [stage.label, stageCounts[stage.id] || 0]; }));
       var statuses = ["unpaid", "pending", "paid", "void"];
@@ -1133,7 +1263,7 @@
         return "<tr data-search=\"" + esc(((person.name || "") + " " + (person.account_number || "")).toLowerCase()) + "\" data-status=\"" + esc(row.status) + "\" data-period=\"" + esc(row.period) + "\">" +
           "<td data-label=\"Customer\">" + esc(person.name || "") + "<br><span class=\"muted\">" + esc(person.account_number || "") + "</span></td>" +
           "<td data-label=\"Period\">" + esc(row.period) + "</td><td data-label=\"Amount\">" + esc(money(row.amount)) + "</td>" +
-          "<td data-label=\"Due\">" + esc(row.due_date || "—") + "</td><td data-label=\"Status\">" + esc(row.status) + "</td>" +
+          "<td data-label=\"Due\">" + esc(row.due_date || "—") + "</td><td data-label=\"Status\">" + statusPill(row.status) + "</td>" +
           "<td data-label=\"\">" + (row.status === "void" ? "" : "<button type=\"button\" class=\"btn secondary\" data-void=\"" + row.id + "\">Void</button>") + "</td></tr>";
       }).join("");
       var month = manilaPeriod();
@@ -1147,7 +1277,7 @@
         "<button class=\"btn\" type=\"submit\">Add bill</button></form></section>" +
         "<div class=\"filters\"><input id=\"bill-q\" placeholder=\"Search name or account\"><select id=\"bill-status\"><option value=\"\">All statuses</option><option>unpaid</option><option>pending</option><option>paid</option><option>void</option></select>" +
         "<select id=\"bill-period-filter\"><option value=\"\">All periods</option>" + periods.map(function (period) { return "<option>" + esc(period) + "</option>"; }).join("") + "</select></div>" +
-        "<table id=\"bill-table\"><thead><tr><th>Customer</th><th>Period</th><th>Amount</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>" + body + "</tbody></table>");
+        "<div class=\"table-card\"><table id=\"bill-table\"><thead><tr><th>Customer</th><th>Period</th><th>Amount</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>" + (body || "<tr><td colspan=\"6\">No bills yet.</td></tr>") + "</tbody></table></div>");
       document.getElementById("bill-customer").onchange = function (event) {
         var row = state.customers.filter(function (item) { return item.id === event.target.value; })[0];
         if (row) document.getElementById("bill-amount").value = row.monthly_bill || row.price || "";
@@ -1223,7 +1353,7 @@
         var bill = row.invoices || {};
         return "<article class=\"row-card\" data-payment=\"" + row.id + "\"><strong>" + esc(person.name || "Customer") + "</strong>" +
           "<p class=\"meta\">" + esc(person.account_number || "") + " · " + esc(bill.period || "") + " · " + esc(money(row.amount)) + " · " + esc(row.method) + "</p>" +
-          "<p>Ref " + esc(row.reference_no || "—") + " · " + esc(manilaTime(row.submitted_at)) + "</p>" +
+          "<p>Ref " + esc(row.reference_no || "—") + " · " + esc(manilaTime(row.submitted_at)) + " " + statusPill(row.status) + "</p>" +
           "<div id=\"proof-" + row.id + "\"></div>" + (actions || "") + "</article>";
       }
       shell("<section class=\"panel\"><h1>Payments</h1><div class=\"tabs\"><button type=\"button\" id=\"tab-pending\" class=\"active\">Pending</button><button type=\"button\" id=\"tab-confirmed\">Confirmed</button></div>" +
@@ -1546,10 +1676,10 @@
 
   function billsCard(customer) {
     var rows = (state.invoices || []).map(function (bill) {
-      return "<li>" + esc(bill.period) + " · " + esc(money(bill.amount)) + " · " + esc(bill.status) + "</li>";
+      return "<li>" + esc(bill.period) + " · " + esc(money(bill.amount)) + " · " + statusPill(bill.status) + "</li>";
     }).join("");
     var pays = (state.pays || []).map(function (pay) {
-      return "<li>" + esc(money(pay.amount)) + " · " + esc(pay.method) + " · " + esc(pay.status) + " · " + esc(pay.reference_no || "") + "</li>";
+      return "<li>" + esc(money(pay.amount)) + " · " + esc(pay.method) + " · " + statusPill(pay.status) + " · " + esc(pay.reference_no || "") + "</li>";
     }).join("");
     var month = manilaPeriod();
     return formCard("Bills & payments",
@@ -1638,21 +1768,24 @@
     sessionEmail = email || "";
     if (!sessionEmail || bootedFor === sessionEmail.toLowerCase()) return;
     bootedFor = sessionEmail.toLowerCase();
-    who.innerHTML = "<span style=\"margin-right:.6rem\">" + esc(sessionEmail) + "</span><button type=\"button\" id=\"sign-out\">Sign out</button>";
+    who.innerHTML = "<span class=\"who-email\">" + esc(sessionEmail) + "</span><button type=\"button\" class=\"btn secondary\" id=\"sign-out\">Sign out</button>";
     document.getElementById("sign-out").onclick = signOut;
     db.from("admins").select("email").eq("email", sessionEmail.toLowerCase()).maybeSingle().then(function (result) {
       if (result.error) {
+        setChrome("guest");
+        if (pageTitle) pageTitle.textContent = "FiberBro";
         app.innerHTML = "<section class=\"panel\"><h1>Could not open the admin list</h1><p>" + esc(errText(result.error)) + "</p><p class=\"muted\">Run supabase/schema.sql in the Supabase SQL editor, then reload.</p></section>";
         return;
       }
       if (!result.data) return renderDenied();
       refresh().then(render).catch(function (error) {
-        app.innerHTML = "<section class=\"panel\"><h1>Could not load records</h1><p>" + esc(errText(error)) + "</p></section>";
+        shell("<section class=\"panel\"><h1>Could not load records</h1><p>" + esc(errText(error)) + "</p></section>");
       });
     });
   }
 
   window.addEventListener("hashchange", function () {
+    setNavOpen(false);
     if (sessionEmail) render();
   });
 
@@ -1678,6 +1811,8 @@
     return db.auth.getSession();
   }).then(function (result) {
     if (!result || result.error) {
+      setChrome("guest");
+      if (pageTitle) pageTitle.textContent = "FiberBro";
       app.innerHTML = "<section class=\"panel\"><h1>Could not reach Supabase</h1><p>" + esc(errText(result && result.error)) + "</p></section>";
       return;
     }
@@ -1685,6 +1820,8 @@
     if (!session) return renderSignedOut();
     boot(session.user.email || "");
   }).catch(function (error) {
+    setChrome("guest");
+    if (pageTitle) pageTitle.textContent = "FiberBro";
     app.innerHTML = "<section class=\"panel\"><h1>Could not load the admin portal</h1><p>" + esc(errText(error)) + "</p></section>";
   });
 })();
