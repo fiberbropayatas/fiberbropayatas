@@ -156,6 +156,7 @@
     if (key === "valid_id_drive_url") return "Valid ID Drive link";
     if (key === "plan_split") return "Plan Split";
     if (key === "fb_account") return "Facebook account";
+    if (key === "portal_enabled") return "Portal access";
     return key || "Field";
   }
 
@@ -499,7 +500,7 @@
     setChrome("guest");
     if (who) who.innerHTML = "";
     if (pageTitle) pageTitle.textContent = "Sign in";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261107a\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261107a\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261111a\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261111a\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -851,6 +852,7 @@
       (history ? formCard("Stage history", "<ul class=\"history\">" + history + "</ul>") : "") +
       sections +
       idBlock +
+      (isNew ? "" : portalCard(customer)) +
       (isNew ? "" : billsCard(customer)) +
       (isNew ? "" : formCard("Change history", state.changeError
         ? "<p class=\"muted\">" + esc(state.changeError) + "</p>"
@@ -877,6 +879,7 @@
     if (!isNew && customer.valid_id_path) loadValidIdPhoto(customer.valid_id_path);
     initCustomerMiniMap();
     wireQuickBill(customer);
+    wirePortalAccess(customer);
     var messengerInput = document.getElementById("f-messenger");
     var messengerOpen = document.getElementById("messenger-open");
     if (messengerInput && messengerOpen) {
@@ -1672,6 +1675,41 @@
         });
       };
     });
+  }
+
+  function portalCard(customer) {
+    var pinState = customer.portal_pin_hash ? "PIN is set" : "No PIN yet";
+    var access = customer.portal_enabled ? "Enabled" : "Disabled";
+    var lock = customer.locked_until && new Date(customer.locked_until).getTime() > Date.now()
+      ? " · Locked until " + manilaTime(customer.locked_until)
+      : "";
+    return formCard("Portal access",
+      "<p class=\"muted\">" + esc(pinState) + " · " + esc(access) + esc(lock) + "</p>" +
+      "<form id=\"portal-form\" class=\"grid two\">" +
+      "<div class=\"field\"><label for=\"portal-pin\">New PIN</label><input id=\"portal-pin\" inputmode=\"numeric\" autocomplete=\"new-password\" maxlength=\"8\" placeholder=\"4–8 digits\"></div>" +
+      "<label class=\"field check\"><input id=\"portal-enabled\" type=\"checkbox\"" + (customer.portal_enabled ? " checked" : "") + "> Portal enabled</label>" +
+      "<button class=\"btn\" type=\"submit\">Save portal access</button></form>" +
+      "<p class=\"muted\">The customer signs in at Customer Login with this account number and PIN. Leave the PIN blank to only enable or disable access.</p>");
+  }
+
+  function wirePortalAccess(customer) {
+    var form = document.getElementById("portal-form");
+    if (!form || !customer || !customer.id) return;
+    form.onsubmit = function (event) {
+      event.preventDefault();
+      var pin = document.getElementById("portal-pin").value.trim();
+      var enabled = document.getElementById("portal-enabled").checked;
+      db.rpc("admin_set_portal_pin", {
+        customer_id: customer.id,
+        pin: pin || null,
+        p_enabled: enabled
+      }).then(function (result) {
+        if (result.error) return flash(errText(result.error));
+        if (!result.data || result.data.ok !== true) return flash("Could not save portal access.");
+        flash("Portal access saved.", true);
+        loadCustomer(customer.id);
+      });
+    };
   }
 
   function billsCard(customer) {
