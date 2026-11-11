@@ -1154,3 +1154,5 @@ grant execute on function public.portal_me(text) to anon, authenticated;
 grant execute on function public.portal_submit_ticket(text, text, text) to anon, authenticated;
 grant execute on function public.portal_submit_payment(text, uuid, numeric, text, text, text, text) to anon, authenticated;
 grant execute on function public.admin_set_portal_pin(uuid, text, boolean) to authenticated;
+
+revoke all on function public.portal_customer(text) from anon, authenticated;
