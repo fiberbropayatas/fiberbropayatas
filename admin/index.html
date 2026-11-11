@@ -6,10 +6,12 @@
   <title>FiberBro admin</title>
   <meta name="robots" content="noindex, nofollow">
   <meta name="description" content="Internal FiberBro admin portal.">
-  <link rel="icon" href="/assets/img/favicon-32.png?v=20261111a" type="image/png" sizes="32x32">
-  <link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png?v=20261111a">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/inter@5.2.6/index.min.css">
-  <link rel="stylesheet" href="/admin/admin.css?v=20261111a">
+  <link rel="icon" href="/assets/img/favicon-32.png?v=20261112a" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png?v=20261112a">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="/admin/admin.css?v=20261112a">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 </head>
 <body>
@@ -19,12 +21,15 @@
       <a class="brand" href="/admin/#dashboard">
         <span class="brand-plate">
           <picture>
-            <source type="image/webp" srcset="/assets/img/fiberbro-logo-header.webp?v=20261111a">
-            <img src="/assets/img/fiberbro-logo-header.png?v=20261111a" width="716" height="224" alt="FiberBro Internet Communication Services Corp.">
+            <source type="image/webp" srcset="/assets/img/fiberbro-logo-header.webp?v=20261112a">
+            <img src="/assets/img/fiberbro-logo-header.png?v=20261112a" width="716" height="224" alt="FiberBro Internet Communication Services Corp.">
           </picture>
         </span>
       </a>
       <nav id="side-nav" class="side-nav" aria-label="Sections"></nav>
+      <button type="button" id="sidebar-collapse" class="sidebar-collapse" aria-pressed="false" aria-label="Collapse sidebar">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M15 6 9 12l6 6"/></svg>
+      </button>
     </aside>
     <div id="nav-scrim" class="scrim" hidden></div>
     <div class="app-main">
@@ -45,8 +50,8 @@
       </main>
     </div>
   </div>
-  <script src="/admin/config.js?v=20261111a"></script>
+  <script src="/admin/config.js?v=20261112a"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-  <script src="/admin/admin.js?v=20261111a"></script>
+  <script src="/admin/admin.js?v=20261112a"></script>
 </body>
 </html>
