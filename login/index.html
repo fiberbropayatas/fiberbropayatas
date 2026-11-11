@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Customer Login — FiberBro</title>
+  <meta name="description" content="Mag-login sa FiberBro customer portal gamit ang account number at PIN.">
+  <meta name="theme-color" content="#D10000">
+  <link rel="canonical" href="https://fiberbro.pages.dev/login/">
+  <link rel="icon" href="/assets/img/favicon-32.png?v=20261111a" type="image/png" sizes="32x32">
+  <link rel="icon" href="/assets/img/favicon-512.png?v=20261111a" type="image/png" sizes="512x512">
+  <link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png?v=20261111a">
+  <link rel="stylesheet" href="/assets/css/styles.css?v=20261111a">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="logo-link" href="/" aria-label="FiberBro home">
+        <picture>
+          <source type="image/webp" srcset="/assets/img/fiberbro-logo-header.webp?v=20261111a">
+          <img src="/assets/img/fiberbro-logo-header.png?v=20261111a" width="716" height="224" alt="FiberBro Internet Communication Services Corp.">
+        </picture>
+      </a>
+      <button class="nav-toggle" type="button" aria-controls="site-nav" aria-expanded="false" aria-label="Open menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+          <path d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <ul>
+          <li><a href="/#home">Home</a></li>
+          <li><a href="/#plans">Plans</a></li>
+          <li><a href="/#coverage">Coverage</a></li>
+          <li><a href="/login/" aria-current="page">Customer Login</a></li>
+          <li><a class="nav-cta" href="/#inquire">Inquire</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+  <main id="main">
+    <section class="section">
+      <div class="container">
+        <div class="form-card">
+          <h1>Customer Login</h1>
+          <p class="pay-note">Ilagay ang account number at PIN na binigay ng FiberBro.</p>
+          <form id="login-form" class="form-grid">
+            <div class="field">
+              <label for="account">Account number</label>
+              <input id="account" name="account" autocomplete="username" inputmode="text" required placeholder="Hal. 1001">
+            </div>
+            <div class="field">
+              <label for="pin">PIN</label>
+              <div class="pin-row">
+                <input id="pin" name="pin" type="password" inputmode="numeric" autocomplete="current-password" minlength="4" maxlength="8" pattern="[0-9]{4,8}" required placeholder="4–8 digits">
+                <button type="button" class="btn btn-secondary" id="pin-toggle" aria-pressed="false" aria-controls="pin" aria-label="Show PIN">Show</button>
+              </div>
+            </div>
+            <button class="btn btn-primary btn-block" id="login-button" type="submit">Log in</button>
+          </form>
+          <div id="login-status" class="form-status" role="alert" hidden></div>
+          <p class="login-help"><a href="https://www.facebook.com/721922910999905" target="_blank" rel="noopener">Forgot PIN / walang PIN pa? Message us on Facebook</a></p>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div class="footer-brand">
+        <picture>
+          <source type="image/webp" srcset="/assets/img/fiberbro-logo-header.webp?v=20261111a">
+          <img src="/assets/img/fiberbro-logo-header.png?v=20261111a" width="716" height="224" alt="FiberBro">
+        </picture>
+        <p>FiberBro Internet Communication Services Corp.</p>
+        <p>Serving Payatas, Quezon City only</p>
+        <p><a href="mailto:fiberbropayatas@gmail.com">fiberbropayatas@gmail.com</a></p>
+      </div>
+      <div class="footer-col">
+        <h3>Explore</h3>
+        <ul>
+          <li><a href="/#plans">Plans</a></li>
+          <li><a href="/#coverage">Coverage</a></li>
+          <li><a href="/#inquire">Inquire</a></li>
+          <li><a href="/login/">Customer Login</a></li>
+          <li><a href="/privacy.html">Privacy Notice</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h3>Connect</h3>
+        <ul>
+          <li><a href="https://www.facebook.com/721922910999905" target="_blank" rel="noopener">Facebook</a></li>
+          <li><a class="btn btn-secondary" href="https://m.me/721922910999905" target="_blank" rel="noopener">Message us on Messenger</a></li>
+          <li><a href="mailto:fiberbropayatas@gmail.com">Email</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="container footer-bottom">
+      <p>© <span id="year">2026</span> FiberBro Internet Communication Services Corp. All rights reserved.</p>
+    </div>
+  </footer>
+  <script src="/admin/config.js?v=20261111a"></script>
+  <script src="/login/login.js?v=20261111a"></script>
+  <script src="/assets/js/main.js?v=20261111a" defer></script>
+</body>
+</html>

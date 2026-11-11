@@ -1,0 +1,3 @@
+/pay /login/ 301
+/pay/ /login/ 301
+/pay/* /login/ 301
