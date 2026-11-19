@@ -417,6 +417,7 @@
     admins: "<path d=\"M12 3 19 6v6c0 4.2-3 6.5-7 7.6C8 18.5 5 16.2 5 12V6z\"/><path d=\"M9 12l2 2 4-4\"/>"
   };
   var navPainted = "";
+  var lastShellRoute = "";
 
   function iconSvg(name, className) {
     return "<svg class=\"" + className + "\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\">" + (ICON_SHAPES[name] || "") + "</svg>";
@@ -469,7 +470,53 @@
     });
     window.addEventListener("resize", function () {
       if (!mobileNav()) setNavOpen(false);
+      applySidebarCollapsed();
     });
+    wireSidebarCollapse();
+  }
+
+  function applySidebarCollapsed() {
+    var stored = false;
+    try { stored = localStorage.getItem("fiberbro-admin-sidebar") === "1"; } catch (err) { stored = false; }
+    var collapsed = stored && !mobileNav();
+    document.body.classList.toggle("sidebar-collapsed", collapsed);
+    var button = document.getElementById("sidebar-collapse");
+    if (button) {
+      button.setAttribute("aria-pressed", stored ? "true" : "false");
+      button.setAttribute("aria-label", stored ? "Expand sidebar" : "Collapse sidebar");
+    }
+  }
+
+  function wireSidebarCollapse() {
+    applySidebarCollapsed();
+    var button = document.getElementById("sidebar-collapse");
+    if (!button) return;
+    button.addEventListener("click", function () {
+      var next = !document.body.classList.contains("sidebar-collapsed");
+      if (mobileNav()) next = false;
+      try { localStorage.setItem("fiberbro-admin-sidebar", next ? "1" : "0"); } catch (err) {}
+      applySidebarCollapsed();
+    });
+  }
+
+  function swapApp(html, title) {
+    var routeName = "";
+    try { routeName = route().name; } catch (err) { routeName = ""; }
+    var changed = routeName !== lastShellRoute;
+    lastShellRoute = routeName;
+    document.body.classList.toggle("is-entering", changed);
+    var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    function write() {
+      if (title && pageTitle) pageTitle.textContent = title;
+      app.innerHTML = html;
+    }
+    if (!reduced && changed && typeof document.startViewTransition === "function") {
+      try {
+        document.startViewTransition(write);
+        return;
+      } catch (err) {}
+    }
+    write();
   }
 
   function paintNav() {
@@ -492,15 +539,14 @@
     setChrome("admin");
     paintNav();
     var current = route().name;
-    if (pageTitle) pageTitle.textContent = PAGE_TITLES[current] || "Dashboard";
-    app.innerHTML = "<div id=\"flash\" class=\"flash\" role=\"status\" aria-live=\"polite\" hidden></div>" + body;
+    swapApp("<div id=\"flash\" class=\"flash\" role=\"status\" aria-live=\"polite\" hidden></div>" + body, PAGE_TITLES[current] || "Dashboard");
   }
 
   function renderSignedOut() {
     setChrome("guest");
     if (who) who.innerHTML = "";
     if (pageTitle) pageTitle.textContent = "Sign in";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261111a\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261111a\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261112a\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261112a\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
