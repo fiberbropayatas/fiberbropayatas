@@ -786,3 +786,60 @@ table, th, td { color: #fff; border-color: rgba(255, 255, 255, 0.12); }
   ::view-transition-old(admin-main),
   ::view-transition-new(admin-main) { animation: none; }
 }
+
+/* Sticky bars stay opaque so scrolling fields never show through them. */
+.topbar,
+.customer-sticky.panel {
+  background: #1a1014;
+  background-color: #1a1014;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 28px rgba(0, 0, 0, 0.55);
+}
+.topbar {
+  z-index: 40;
+  isolation: isolate;
+}
+.topbar::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: -12px;
+  right: -12px;
+  top: -12px;
+  height: 12px;
+  background: #12080c;
+}
+.customer-sticky.panel {
+  z-index: 35;
+  top: 88px;
+  animation: none;
+}
+.customer-sticky.panel::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: 0;
+  right: 0;
+  top: -14px;
+  height: 14px;
+  background: #12080c;
+}
+.customer-sticky h1,
+.page-title {
+  color: #fff;
+  font-weight: 700;
+}
+.table-card thead th {
+  background: #1a1014;
+  color: rgba(255, 255, 255, 0.72);
+}
+@media (max-width: 959px) {
+  .topbar::before { display: none; }
+  .customer-sticky.panel { top: 72px; }
+}
+@media (max-width: 720px) {
+  .customer-sticky.panel { top: 68px; }
+  .customer-sticky .actions { width: 100%; }
+}
