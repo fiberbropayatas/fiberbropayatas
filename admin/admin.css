@@ -687,6 +687,9 @@ table, th, td { color: #fff; border-color: rgba(255, 255, 255, 0.12); }
 .panel, .stat-card, .table-card, .kanban-col, .chart-grid {
   animation: glass-enter 0.45s ease backwards;
 }
+body.is-entering .wrap > * {
+  animation: glass-enter 0.4s ease backwards;
+}
 .stat-card:nth-child(2) { animation-delay: 0.04s; }
 .stat-card:nth-child(3) { animation-delay: 0.08s; }
 .stat-card:nth-child(4) { animation-delay: 0.12s; }
