@@ -120,19 +120,31 @@
         (settings.payment_note ? "<p class=\"pay-note\">" + esc(settings.payment_note) + "</p>" : "") +
         "</div>" +
         "<form id=\"pay-form\" class=\"form-grid\">" +
+        "<div class=\"field\"><label for=\"pay-method\">Paraan</label><select id=\"pay-method\"><option value=\"gcash\">GCash</option><option value=\"bank\">Bank</option></select></div>" +
         "<div class=\"field\"><label for=\"amount\">Amount</label><input id=\"amount\" type=\"number\" min=\"0.01\" step=\"0.01\" required value=\"" + esc(bills[0].amount) + "\"></div>" +
-        "<div class=\"field\"><label for=\"reference\">Reference number</label><input id=\"reference\" required placeholder=\"GCash reference\"></div>" +
+        "<div class=\"field\"><label for=\"reference\">Reference number</label><input id=\"reference\" required placeholder=\"GCash o bank reference\"></div>" +
         "<div class=\"field\"><label for=\"payer\">Pangalan ng nagbayad <span class=\"hint\">(opsyonal)</span></label><input id=\"payer\"></div>" +
-        "<div class=\"field\"><label for=\"proof\">Screenshot ng resibo <span class=\"hint\">(opsyonal, JPG/PNG)</span></label><input id=\"proof\" type=\"file\" accept=\"image/jpeg,image/png,image/webp\"></div>" +
+        "<div class=\"field\"><label for=\"proof\">Screenshot ng resibo <span class=\"hint\">(JPG/PNG/WebP, max 2 MB)</span></label><input id=\"proof\" type=\"file\" accept=\"image/jpeg,image/png,image/webp\"></div>" +
         "<button class=\"btn btn-primary\" type=\"submit\">Ipadala ang bayad</button></form>";
       current = { invoiceId: bills[0].id, bills: bills };
     }
     var invoiceRows = invoices.map(function (bill) {
       return "<li>" + esc(bill.period) + " · " + esc(peso(bill.amount)) + " · " + esc(bill.status) + "</li>";
     }).join("") || "<li>Wala pang bill.</li>";
+    function payLabel(status) {
+      if (status === "pending") return "Pending";
+      if (status === "confirmed") return "Confirmed";
+      if (status === "rejected") return "Rejected";
+      return status || "";
+    }
     var paymentRows = payments.map(function (pay) {
-      return "<li>" + esc(peso(pay.amount)) + " · " + esc(pay.method) + " · " + esc(pay.status) + " · " + esc(pay.reference_no || "") + "</li>";
+      return "<li>" + esc(peso(pay.amount)) + " · " + esc(pay.method) + " · " + esc(payLabel(pay.status)) + " · " + esc(pay.reference_no || "") +
+        (pay.reject_reason ? "<br><span class=\"pay-note\">" + esc(pay.reject_reason) + "</span>" : "") + "</li>";
     }).join("") || "<li>Wala pang payment.</li>";
+    var history = ledger(invoices, payments);
+    var historyRows = history.events.map(function (event) {
+      return "<li>" + esc(event.kind) + " " + esc(event.label) + " · " + esc(peso(event.charge || event.credit)) + " · balance " + esc(peso(event.balance)) + "</li>";
+    }).join("") || "<li>Wala pang transaction.</li>";
     var ticketRows = tickets.map(function (ticket) {
       return "<li><strong>" + esc(ticket.title) + "</strong> · " + esc(ticket.status) + "<br>" + esc(ticket.description || "") + "</li>";
     }).join("") || "<li>Wala pang repair request.</li>";
@@ -146,6 +158,7 @@
       "<section class=\"portal-block\"><h2>Bills</h2><ul>" + invoiceRows + "</ul></section>" +
       "<section class=\"portal-block\"><h2>Magbayad</h2>" + payForm + "</section>" +
       "<section class=\"portal-block\"><h2>Payments</h2><ul>" + paymentRows + "</ul></section>" +
+      "<section class=\"portal-block\"><h2>Transaction history</h2><p class=\"pay-note\">Wallet credit: " + esc(peso(history.credit)) + "</p><ul>" + historyRows + "</ul></section>" +
       "<section class=\"portal-block\"><h2>Technical inquiry</h2>" +
       "<p class=\"pay-note\">Ipapakita ito sa FiberBro repairs.</p>" +
       "<form id=\"ticket-form\" class=\"form-grid\">" +
@@ -174,12 +187,50 @@
     form.onsubmit = submitPayment;
   }
 
+  function ledger(invoices, payments) {
+    var events = [];
+    (invoices || []).forEach(function (inv) {
+      if (inv.status === "void") return;
+      events.push({ at: inv.created_at || inv.due_date || inv.period || "", kind: "Bill", label: inv.period || "", charge: Number(inv.amount) || 0, credit: 0 });
+    });
+    (payments || []).forEach(function (pay) {
+      events.push({
+        at: pay.confirmed_at || pay.submitted_at || "",
+        kind: "Payment",
+        label: pay.reference_no || pay.method || "",
+        charge: 0,
+        credit: pay.status === "confirmed" ? (Number(pay.amount) || 0) : 0
+      });
+    });
+    events.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
+    var running = 0;
+    events.forEach(function (event) {
+      running += event.charge - event.credit;
+      event.balance = running;
+    });
+    return { events: events, credit: events.length ? Math.max(0, -events[events.length - 1].balance) : 0 };
+  }
+
+  function blobToBase64(blob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        var text = String(reader.result || "");
+        var comma = text.indexOf(",");
+        resolve(comma >= 0 ? text.slice(comma + 1) : text);
+      };
+      reader.onerror = function () { reject(new Error("Hindi mabasa ang larawan.")); };
+      reader.readAsDataURL(blob);
+    });
+  }
+
   function submitPayment(event) {
     event.preventDefault();
     clearStatus();
     var amount = Number(document.getElementById("amount").value);
     var reference = document.getElementById("reference").value.trim();
     var payer = document.getElementById("payer").value.trim();
+    var method = document.getElementById("pay-method").value;
     var file = document.getElementById("proof").files[0];
     var button = document.querySelector("#pay-form button");
     if (!reference) return showStatus("error", "Kailangan ang reference number.");
@@ -187,28 +238,31 @@
     button.textContent = "Ipinapadala…";
     getClient().then(function (client) {
       if (!client) throw new Error("Hindi makakonekta ngayon. Subukan muli.");
-      var proofPromise = Promise.resolve(null);
-      if (file) {
-        if (file.size > 10 * 1024 * 1024) throw new Error("Masyadong malaki ang larawan. Pumili ng mas maliit.");
-        proofPromise = compressImage(file).then(function (blob) {
-          if (blob.size > 5 * 1024 * 1024) throw new Error("Masyadong malaki ang larawan pagkatapos i-compress. Max 5 MB.");
-          var path = proofPath();
-          return client.storage.from("payment-proofs").upload(path, blob, { contentType: "image/jpeg", upsert: false })
-            .then(function (upload) {
-              if (upload.error) throw new Error(upload.error.message || "Hindi na-upload ang screenshot.");
-              return path;
-            });
-        });
-      }
-      return proofPromise.then(function (path) {
+      if (!file) {
         return client.rpc("portal_submit_payment", {
           token: token,
           p_invoice: current.invoiceId,
           p_amount: amount,
-          p_method: "gcash",
+          p_method: method,
           p_reference: reference,
           p_payer: payer,
-          p_proof: path
+          p_proof: null
+        });
+      }
+      if (file.size > 8 * 1024 * 1024) throw new Error("Masyadong malaki ang larawan. Pumili ng mas maliit.");
+      return compressImage(file).then(function (blob) {
+        if (blob.size > 2 * 1024 * 1024) throw new Error("Ang screenshot ay dapat 2 MB pababa.");
+        return blobToBase64(blob).then(function (image) {
+          return client.rpc("portal_submit_proof", {
+            token: token,
+            p_invoice: current.invoiceId,
+            p_amount: amount,
+            p_method: method,
+            p_reference: reference,
+            p_payer: payer,
+            p_image_base64: image,
+            p_mime: "image/jpeg"
+          });
         });
       });
     }).then(function (result) {

@@ -128,6 +128,7 @@
   var sessionEmail = "";
   var state = { customers: [], investors: [], technicians: [], tickets: [], admins: [], events: [], changes: [], ticket: null, customer: null };
   var ui = { q: "", stage: "all", area: "" };
+  var billingTab = "bills";
 
   function esc(value) {
     return String(value == null ? "" : value)
@@ -377,7 +378,8 @@
     ]],
     ["Billing", [
       ["billing", "Billing", "billing"],
-      ["payments", "Payments", "payments"]
+      ["payments", "Payments", "payments"],
+      ["finance", "Finance", "billing"]
     ]],
     ["Network", [
       ["map", "Map", "map"],
@@ -395,6 +397,7 @@
     customer: "Customer",
     billing: "Billing",
     payments: "Payments",
+    finance: "Finance",
     map: "Map",
     repairs: "Repairs",
     investors: "Investors",
@@ -536,7 +539,7 @@
     setChrome("guest");
     if (who) who.innerHTML = "";
     if (pageTitle) pageTitle.textContent = "Sign in";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261119b\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261119b\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261119c\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261119c\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -890,6 +893,7 @@
       idBlock +
       (isNew ? "" : portalCard(customer)) +
       (isNew ? "" : billsCard(customer)) +
+      (isNew ? "" : historyCard(customer)) +
       (isNew ? "" : formCard("Change history", state.changeError
         ? "<p class=\"muted\">" + esc(state.changeError) + "</p>"
         : changeHistoryHtml(state.changes)))
@@ -916,6 +920,7 @@
     initCustomerMiniMap();
     wireQuickBill(customer);
     wirePortalAccess(customer);
+    wireHistory();
     var messengerInput = document.getElementById("f-messenger");
     var messengerOpen = document.getElementById("messenger-open");
     if (messengerInput && messengerOpen) {
@@ -1159,7 +1164,7 @@
   function statusPill(status) {
     var key = String(status || "").toLowerCase();
     var known = {
-      unpaid: 1, pending: 1, paid: 1, void: 1,
+      unpaid: 1, pending: 1, paid: 1, void: 1, grace: 1, overdue: 1,
       confirmed: 1, rejected: 1,
       open: 1, assigned: 1, closed: 1,
       low: 1, normal: 1, high: 1,
@@ -1288,35 +1293,226 @@
     }).catch(function (error) { flash(errText(error)); });
   }
 
+  function ledgerEvents(invoices, payments) {
+    var events = [];
+    (invoices || []).forEach(function (inv) {
+      if (inv.status === "void") return;
+      events.push({
+        at: inv.created_at || inv.due_date || "",
+        kind: "Bill",
+        label: inv.period || "",
+        method: "",
+        status: inv.status || "",
+        charge: Number(inv.amount) || 0,
+        credit: 0
+      });
+    });
+    (payments || []).forEach(function (pay) {
+      events.push({
+        at: pay.confirmed_at || pay.submitted_at || "",
+        kind: "Payment",
+        label: pay.reference_no || "",
+        method: pay.method || "",
+        status: pay.status || "",
+        charge: 0,
+        credit: pay.status === "confirmed" ? (Number(pay.amount) || 0) : 0
+      });
+    });
+    events.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
+    var running = 0;
+    events.forEach(function (event) {
+      running += event.charge - event.credit;
+      event.balance = running;
+    });
+    return events;
+  }
+
+  function historyCard(customer) {
+    var events = ledgerEvents(state.invoices, state.pays);
+    var credit = 0;
+    if (events.length) credit = Math.max(0, -events[events.length - 1].balance);
+    var years = [];
+    events.forEach(function (event) {
+      var year = String(event.at).slice(0, 4);
+      if (year && years.indexOf(year) === -1) years.push(year);
+    });
+    var rows = events.map(function (event) {
+      return "<tr data-year=\"" + esc(String(event.at).slice(0, 4)) + "\" data-month=\"" + esc(String(event.at).slice(5, 7)) + "\" data-method=\"" + esc(event.method) + "\">" +
+        "<td data-label=\"When\">" + esc(manilaTime(event.at) || String(event.at).slice(0, 10) || "—") + "</td>" +
+        "<td data-label=\"Type\">" + esc(event.kind) + " " + esc(event.label) + "</td>" +
+        "<td data-label=\"Method\">" + esc(event.method || "—") + "</td>" +
+        "<td data-label=\"Status\">" + statusPill(event.status) + "</td>" +
+        "<td data-label=\"Charge\">" + (event.charge ? esc(money(event.charge)) : "—") + "</td>" +
+        "<td data-label=\"Credit\">" + (event.credit ? esc(money(event.credit)) : "—") + "</td>" +
+        "<td data-label=\"Balance\">" + esc(money(event.balance)) + "</td></tr>";
+    }).join("");
+    return formCard("Transaction history",
+      "<p class=\"muted\">Running balance counts bills and confirmed payments. Wallet credit is overpayment carried forward. Stored wallet credit: " + esc(money(customer.wallet_credit || 0)) + ". Computed from this list: " + esc(money(credit)) + ".</p>" +
+      "<div class=\"filters\"><select id=\"history-year\"><option value=\"\">All years</option>" + years.map(function (year) { return "<option>" + esc(year) + "</option>"; }).join("") + "</select>" +
+      "<select id=\"history-month\"><option value=\"\">All months</option>" + ["01","02","03","04","05","06","07","08","09","10","11","12"].map(function (month) { return "<option value=\"" + month + "\">" + month + "</option>"; }).join("") + "</select>" +
+      "<select id=\"history-method\"><option value=\"\">All methods</option><option>gcash</option><option>maya</option><option>bank</option><option>cash</option><option>other</option></select></div>" +
+      "<div class=\"table-card\"><table id=\"history-table\"><thead><tr><th>When</th><th>Type</th><th>Method</th><th>Status</th><th>Charge</th><th>Credit</th><th>Balance</th></tr></thead><tbody>" +
+      (rows || "<tr><td colspan=\"7\">No transactions yet.</td></tr>") + "</tbody></table></div>");
+  }
+
+  function wireHistory() {
+    var table = document.getElementById("history-table");
+    if (!table) return;
+    function apply() {
+      var year = document.getElementById("history-year").value;
+      var month = document.getElementById("history-month").value;
+      var method = document.getElementById("history-method").value;
+      table.querySelectorAll("tbody tr").forEach(function (row) {
+        if (!row.getAttribute("data-year")) return;
+        row.hidden = (year && row.getAttribute("data-year") !== year) ||
+          (month && row.getAttribute("data-month") !== month) ||
+          (method && row.getAttribute("data-method") !== method);
+      });
+    }
+    ["history-year", "history-month", "history-method"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener("change", apply);
+    });
+  }
+
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var existing = document.querySelector("script[src=\"" + src + "\"]");
+      if (existing) {
+        if (existing.getAttribute("data-loaded") === "1") return resolve();
+        existing.addEventListener("load", function () { resolve(); });
+        existing.addEventListener("error", reject);
+        return;
+      }
+      var script = document.createElement("script");
+      script.src = src;
+      script.onload = function () { script.setAttribute("data-loaded", "1"); resolve(); };
+      script.onerror = function () { reject(new Error("Could not load " + src)); };
+      document.head.appendChild(script);
+    });
+  }
+
+  function dayStart(value) {
+    var date = value ? new Date(value) : new Date();
+    if (isNaN(date.getTime()) && value) date = new Date(String(value).slice(0, 10) + "T00:00:00");
+    date.setHours(0, 0, 0, 0);
+    return date;
+  }
+
+  function billTiming(row, graceDays) {
+    if (row.status === "paid" || row.status === "void") return row.status;
+    if (!row.due_date) return "unpaid";
+    var due = dayStart(row.due_date);
+    var today = dayStart();
+    if (due >= today) return "unpaid";
+    var graceEnd = new Date(due.getTime());
+    graceEnd.setDate(graceEnd.getDate() + graceDays);
+    if (today <= graceEnd) return "grace";
+    return "overdue";
+  }
+
   function renderBilling() {
     var gen = viewGen;
     shell("<section class=\"panel\"><h1>Billing</h1><p class=\"muted\">Loading bills…</p></section>");
-    db.from("invoices").select("*, customers(name, account_number, monthly_bill, price)").order("period", { ascending: false }).then(function (result) {
-      if (result.error) return flash(errText(result.error));
+    Promise.all([
+      db.from("invoices").select("*, customers(id, name, account_number, plan, plan_speed, address, monthly_bill, price)").order("due_date", { ascending: true }),
+      db.from("payments").select("*, customers(name, account_number), invoices(period, id)").order("submitted_at", { ascending: false }),
+      db.from("app_settings").select("key, value").in("key", ["grace_days"])
+    ]).then(function (parts) {
       if (gen !== viewGen) return;
-      var rows = result.data || [];
-      var periods = [];
-      rows.forEach(function (row) { if (periods.indexOf(row.period) === -1) periods.push(row.period); });
-      var body = rows.map(function (row) {
+      if (parts[0].error) return flash(errText(parts[0].error));
+      var invoices = parts[0].data || [];
+      var payments = parts[1].error ? [] : (parts[1].data || []);
+      var graceDays = 3;
+      ((parts[2].data) || []).forEach(function (row) {
+        if (row.key === "grace_days" && Number(row.value) > 0) graceDays = Number(row.value);
+      });
+      var today = dayStart();
+      invoices.forEach(function (row) { row._bucket = billTiming(row, graceDays); });
+      function sumOf(list) {
+        return list.reduce(function (sum, row) { return sum + Number(row.amount || 0); }, 0);
+      }
+      var overdue = invoices.filter(function (row) { return row._bucket === "overdue"; });
+      var grace = invoices.filter(function (row) { return row._bucket === "grace"; });
+      var notDue = invoices.filter(function (row) { return row._bucket === "unpaid"; });
+      var cards = [
+        ["Overdue", overdue.length + " · " + money(sumOf(overdue))],
+        ["Grace period", grace.length + " · " + money(sumOf(grace))],
+        ["Unpaid, not yet due", notDue.length + " · " + money(sumOf(notDue))]
+      ].map(function (card) {
+        return "<article class=\"stat-card\"><div><p class=\"stat-label\">" + esc(card[0]) + "</p><p class=\"stat-value\">" + esc(card[1]) + "</p></div></article>";
+      }).join("");
+      var years = [];
+      invoices.forEach(function (row) {
+        var year = String(row.period || row.due_date || "").slice(0, 4);
+        if (year && years.indexOf(year) === -1) years.push(year);
+      });
+      years.sort();
+      function searchBlob(row) {
         var person = row.customers || {};
-        return "<tr data-search=\"" + esc(((person.name || "") + " " + (person.account_number || "")).toLowerCase()) + "\" data-status=\"" + esc(row.status) + "\" data-period=\"" + esc(row.period) + "\">" +
+        return ((person.name || "") + " " + (person.account_number || "") + " " + (row.period || "") + " " + (row.id || "")).toLowerCase();
+      }
+      function billRow(row) {
+        var person = row.customers || {};
+        return "<tr data-search=\"" + esc(searchBlob(row)) + "\" data-status=\"" + esc(row.status) + "\" data-period=\"" + esc(row.period) + "\" data-month=\"" + esc(String(row.period || row.due_date || "").slice(5, 7)) + "\" data-year=\"" + esc(String(row.period || row.due_date || "").slice(0, 4)) + "\" data-bucket=\"" + esc(row._bucket) + "\">" +
           "<td data-label=\"Customer\">" + esc(person.name || "") + "<br><span class=\"muted\">" + esc(person.account_number || "") + "</span></td>" +
           "<td data-label=\"Period\">" + esc(row.period) + "</td><td data-label=\"Amount\">" + esc(money(row.amount)) + "</td>" +
-          "<td data-label=\"Due\">" + esc(row.due_date || "—") + "</td><td data-label=\"Status\">" + statusPill(row.status) + "</td>" +
-          "<td data-label=\"\">" + (row.status === "void" ? "" : "<button type=\"button\" class=\"btn secondary\" data-void=\"" + row.id + "\">Void</button>") + "</td></tr>";
+          "<td data-label=\"Due\">" + esc(row.due_date || "—") + "</td><td data-label=\"Status\">" + statusPill(row._bucket === "grace" || row._bucket === "overdue" ? row._bucket : row.status) + "</td>" +
+          "<td data-label=\"\">" +
+          "<button type=\"button\" class=\"btn secondary\" data-soa=\"" + esc(person.id || row.customer_id) + "\" data-invoice=\"" + row.id + "\">Download SOA</button> " +
+          (row.status === "void" ? "" : "<button type=\"button\" class=\"btn secondary\" data-void=\"" + row.id + "\">Void</button>") +
+          "</td></tr>";
+      }
+      var dueRows = invoices.filter(function (row) {
+        return (row.status === "unpaid" || row.status === "pending") && row.due_date && dayStart(row.due_date) >= today;
+      }).slice().sort(function (a, b) { return String(a.due_date).localeCompare(String(b.due_date)); });
+      var pendingPays = payments.filter(function (row) { return row.status === "pending"; });
+      var confirmedPays = payments.filter(function (row) { return row.status === "confirmed"; });
+      function payRow(row) {
+        var person = row.customers || {};
+        var bill = row.invoices || {};
+        return "<tr data-search=\"" + esc(((person.name || "") + " " + (person.account_number || "") + " " + (bill.period || "") + " " + (row.id || "")).toLowerCase()) + "\" data-status=\"" + esc(row.status) + "\" data-month=\"" + esc(String(row.submitted_at || "").slice(5, 7)) + "\" data-year=\"" + esc(String(row.submitted_at || "").slice(0, 4)) + "\">" +
+          "<td data-label=\"Customer\">" + esc(person.name || "") + "<br><span class=\"muted\">" + esc(person.account_number || "") + "</span></td>" +
+          "<td data-label=\"Bill\">" + esc(bill.period || "") + "</td>" +
+          "<td data-label=\"Amount\">" + esc(money(row.amount)) + "</td>" +
+          "<td data-label=\"Method\">" + esc(row.method || "") + "</td>" +
+          "<td data-label=\"Reference\">" + esc(row.reference_no || "—") + "</td>" +
+          "<td data-label=\"When\">" + esc(manilaTime(row.submitted_at)) + "</td>" +
+          "<td data-label=\"Status\">" + statusPill(row.status) + (row.reject_reason ? "<br><span class=\"muted\">" + esc(row.reject_reason) + "</span>" : "") + "</td>" +
+          "<td data-label=\"Proof\"><div id=\"proof-" + row.id + "\"></div>" +
+          (row.proof_path ? "" : "<button type=\"button\" class=\"btn secondary\" data-view-proof=\"" + row.id + "\">View</button>") + "</td>" +
+          (row.status === "pending" ? "<td data-label=\"\"><input id=\"reject-" + row.id + "\" placeholder=\"Reject reason\"><div class=\"actions\"><button type=\"button\" class=\"btn\" data-confirm=\"" + row.id + "\">Confirm</button><button type=\"button\" class=\"btn secondary\" data-reject=\"" + row.id + "\">Reject</button></div></td>" : "<td></td>") +
+          "</tr>";
+      }
+      var monthNow = manilaPeriod();
+      var tabs = ["bills", "due", "proofs", "history"].map(function (tab) {
+        var label = { bills: "Bills", due: "Due date", proofs: "Proof of payments", history: "Confirmed history" }[tab];
+        return "<button type=\"button\" data-bill-tab=\"" + tab + "\"" + (billingTab === tab ? " class=\"active\"" : "") + ">" + label + "</button>";
       }).join("");
-      var month = manilaPeriod();
-      shell("<section class=\"panel\"><h1>Billing</h1>" +
-        "<div class=\"toolbar\"><button type=\"button\" class=\"btn\" id=\"generate-bills\">Generate bills for</button><input id=\"generate-period\" type=\"month\" value=\"" + month + "\"></div>" +
+      shell("<section class=\"panel\"><h1>Billing</h1><div class=\"stat-grid\">" + cards + "</div>" +
+        "<p class=\"muted\">Grace period is " + graceDays + " day(s) after the due date. Change it under Settings.</p>" +
+        "<div class=\"toolbar\"><button type=\"button\" class=\"btn\" id=\"generate-bills\">Generate bills for</button><input id=\"generate-period\" type=\"month\" value=\"" + monthNow + "\"></div>" +
         "<form id=\"add-bill\" class=\"grid two\">" +
         "<div class=\"field\"><label for=\"bill-customer\">Customer</label><select id=\"bill-customer\" required><option value=\"\">Select</option>" + customerChoices() + "</select></div>" +
-        "<div class=\"field\"><label for=\"bill-period\">Period</label><input id=\"bill-period\" type=\"month\" required value=\"" + month + "\"></div>" +
+        "<div class=\"field\"><label for=\"bill-period\">Period</label><input id=\"bill-period\" type=\"month\" required value=\"" + monthNow + "\"></div>" +
         "<div class=\"field\"><label for=\"bill-amount\">Amount</label><input id=\"bill-amount\" type=\"number\" min=\"0\" step=\"0.01\" required></div>" +
         "<div class=\"field\"><label for=\"bill-due\">Due date</label><input id=\"bill-due\" type=\"date\"></div>" +
         "<button class=\"btn\" type=\"submit\">Add bill</button></form></section>" +
-        "<div class=\"filters\"><input id=\"bill-q\" placeholder=\"Search name or account\"><select id=\"bill-status\"><option value=\"\">All statuses</option><option>unpaid</option><option>pending</option><option>paid</option><option>void</option></select>" +
-        "<select id=\"bill-period-filter\"><option value=\"\">All periods</option>" + periods.map(function (period) { return "<option>" + esc(period) + "</option>"; }).join("") + "</select></div>" +
-        "<div class=\"table-card\"><table id=\"bill-table\"><thead><tr><th>Customer</th><th>Period</th><th>Amount</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>" + (body || "<tr><td colspan=\"6\">No bills yet.</td></tr>") + "</tbody></table></div>");
+        "<div class=\"tabs\" id=\"bill-tabs\">" + tabs + "</div>" +
+        "<div class=\"filters\"><input id=\"bill-q\" placeholder=\"Search name, account, or invoice\">" +
+        "<select id=\"bill-status\"><option value=\"\">All statuses</option><option>unpaid</option><option>pending</option><option>paid</option><option>void</option><option>grace</option><option>overdue</option></select>" +
+        "<select id=\"bill-month\"><option value=\"\">All months</option>" + ["01","02","03","04","05","06","07","08","09","10","11","12"].map(function (month) { return "<option value=\"" + month + "\">" + month + "</option>"; }).join("") + "</select>" +
+        "<select id=\"bill-year\"><option value=\"\">All years</option>" + years.map(function (year) { return "<option>" + esc(year) + "</option>"; }).join("") + "</select></div>" +
+        "<div class=\"table-card\" id=\"pane-bills\"" + (billingTab === "bills" ? "" : " hidden") + "><table id=\"bill-table\"><thead><tr><th>Customer</th><th>Period</th><th>Amount</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>" +
+        (invoices.map(billRow).join("") || "<tr><td colspan=\"6\">No bills yet.</td></tr>") + "</tbody></table></div>" +
+        "<div class=\"table-card\" id=\"pane-due\"" + (billingTab === "due" ? "" : " hidden") + "><table id=\"bill-due-table\"><thead><tr><th>Customer</th><th>Period</th><th>Amount</th><th>Due</th><th>Status</th><th></th></tr></thead><tbody>" +
+        (dueRows.map(billRow).join("") || "<tr><td colspan=\"6\">No upcoming due dates.</td></tr>") + "</tbody></table></div>" +
+        "<div class=\"table-card\" id=\"pane-proofs\"" + (billingTab === "proofs" ? "" : " hidden") + "><table id=\"bill-proof-table\"><thead><tr><th>Customer</th><th>Bill</th><th>Amount</th><th>Method</th><th>Reference</th><th>When</th><th>Status</th><th>Proof</th><th></th></tr></thead><tbody>" +
+        (pendingPays.map(payRow).join("") || "<tr><td colspan=\"9\">No proofs waiting for review.</td></tr>") + "</tbody></table></div>" +
+        "<div class=\"table-card\" id=\"pane-history\"" + (billingTab === "history" ? "" : " hidden") + "><table id=\"bill-history-table\"><thead><tr><th>Customer</th><th>Bill</th><th>Amount</th><th>Method</th><th>Reference</th><th>When</th><th>Status</th><th>Proof</th><th></th></tr></thead><tbody>" +
+        (confirmedPays.map(payRow).join("") || "<tr><td colspan=\"9\">No confirmed payments yet.</td></tr>") + "</tbody></table></div>");
+      if (parts[1].error) flash("Payments could not be loaded. Apply supabase/migrations/20261119_finance_billing.sql if reject reasons are missing. " + errText(parts[1].error));
+      pendingPays.concat(confirmedPays).forEach(function (row) { if (row.proof_path) proofThumb(row.proof_path, "proof-" + row.id); });
       document.getElementById("bill-customer").onchange = function (event) {
         var row = state.customers.filter(function (item) { return item.id === event.target.value; })[0];
         if (row) document.getElementById("bill-amount").value = row.monthly_bill || row.price || "";
@@ -1343,20 +1539,36 @@
           renderBilling();
         });
       };
+      document.querySelectorAll("[data-bill-tab]").forEach(function (button) {
+        button.onclick = function () {
+          billingTab = button.getAttribute("data-bill-tab");
+          ["bills", "due", "proofs", "history"].forEach(function (tab) {
+            var pane = document.getElementById("pane-" + tab);
+            if (pane) pane.hidden = tab !== billingTab;
+            if (button.parentNode) {
+              button.parentNode.querySelectorAll("button").forEach(function (el) { el.classList.toggle("active", el === button); });
+            }
+          });
+        };
+      });
       function filterBills() {
         var q = document.getElementById("bill-q").value.trim().toLowerCase();
         var status = document.getElementById("bill-status").value;
-        var period = document.getElementById("bill-period-filter").value;
-        app.querySelectorAll("#bill-table tbody tr").forEach(function (row) {
-          var show = (!q || row.getAttribute("data-search").indexOf(q) !== -1) &&
-            (!status || row.getAttribute("data-status") === status) &&
-            (!period || row.getAttribute("data-period") === period);
-          row.hidden = !show;
+        var month = document.getElementById("bill-month").value;
+        var year = document.getElementById("bill-year").value;
+        app.querySelectorAll("#bill-table tbody tr, #bill-due-table tbody tr, #bill-proof-table tbody tr, #bill-history-table tbody tr").forEach(function (row) {
+          if (!row.getAttribute("data-search")) return;
+          var statusOk = !status || row.getAttribute("data-status") === status || row.getAttribute("data-bucket") === status;
+          row.hidden = (q && row.getAttribute("data-search").indexOf(q) === -1) || !statusOk ||
+            (month && row.getAttribute("data-month") !== month) ||
+            (year && row.getAttribute("data-year") !== year);
         });
       }
-      ["bill-q", "bill-status", "bill-period-filter"].forEach(function (id) {
-        document.getElementById(id).addEventListener("input", filterBills);
-        document.getElementById(id).addEventListener("change", filterBills);
+      ["bill-q", "bill-status", "bill-month", "bill-year"].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener("input", filterBills);
+        el.addEventListener("change", filterBills);
       });
       app.querySelectorAll("[data-void]").forEach(function (button) {
         button.onclick = function () {
@@ -1366,7 +1578,295 @@
           });
         };
       });
+      app.querySelectorAll("[data-soa]").forEach(function (button) {
+        button.onclick = function () { downloadSoa(button.getAttribute("data-soa"), button.getAttribute("data-invoice")); };
+      });
+      app.querySelectorAll("[data-view-proof]").forEach(function (button) {
+        button.onclick = function () { showStoredProof(button.getAttribute("data-view-proof")); };
+      });
+      app.querySelectorAll("[data-confirm]").forEach(function (button) {
+        button.onclick = function () { reviewPayment(button.getAttribute("data-confirm"), "confirmed", ""); };
+      });
+      app.querySelectorAll("[data-reject]").forEach(function (button) {
+        button.onclick = function () {
+          var id = button.getAttribute("data-reject");
+          var reasonEl = document.getElementById("reject-" + id);
+          reviewPayment(id, "rejected", reasonEl ? reasonEl.value.trim() : "");
+        };
+      });
+    }).catch(function (error) { flash(errText(error)); });
+  }
+
+  function reviewPayment(id, status, reason) {
+    if (status === "rejected" && !reason) return flash("Add a reject reason.");
+    var patch = {
+      status: status,
+      confirmed_by: sessionEmail,
+      confirmed_at: new Date().toISOString()
+    };
+    if (status === "rejected") patch.reject_reason = reason;
+    db.from("payments").update(patch).eq("id", id).then(function (update) {
+      if (update.error) return flash(errText(update.error));
+      flash(status === "confirmed" ? "Payment confirmed." : "Payment rejected.", true);
+      renderBilling();
     });
+  }
+
+  function showStoredProof(paymentId) {
+    var box = document.getElementById("proof-" + paymentId);
+    if (!box) return;
+    box.innerHTML = "<p class=\"muted\">Loading…</p>";
+    db.from("payment_proof_files").select("content_type, image_base64").eq("payment_id", paymentId).maybeSingle().then(function (result) {
+      if (result.error || !result.data) {
+        box.innerHTML = "<p class=\"muted\">No stored screenshot for this payment.</p>";
+        return;
+      }
+      var src = "data:" + result.data.content_type + ";base64," + result.data.image_base64;
+      box.innerHTML = "<a href=\"" + src + "\" target=\"_blank\" rel=\"noopener\"><img class=\"id-thumb\" alt=\"Payment proof\" src=\"" + src + "\"></a>";
+    });
+  }
+
+  function downloadSoa(customerId, invoiceId) {
+    Promise.all([
+      db.from("customers").select("name, account_number, plan, plan_speed, address, area").eq("id", customerId).single(),
+      db.from("invoices").select("*").eq("customer_id", customerId).order("period"),
+      db.from("payments").select("*").eq("customer_id", customerId).order("submitted_at"),
+      loadScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js")
+    ]).then(function (parts) {
+      if (parts[0].error) return flash(errText(parts[0].error));
+      if (parts[1].error) return flash(errText(parts[1].error));
+      var person = parts[0].data || {};
+      var invoices = parts[1].data || [];
+      var payments = parts[2].error ? [] : (parts[2].data || []);
+      var JsPDF = window.jspdf && window.jspdf.jsPDF;
+      if (!JsPDF) return flash("Could not load the PDF library.");
+      var doc = new JsPDF();
+      var y = 16;
+      function line(text, size, color) {
+        if (y > 280) { doc.addPage(); y = 16; }
+        doc.setFontSize(size || 11);
+        doc.setTextColor(color || 30);
+        doc.text(String(text), 14, y);
+        y += (size || 11) > 13 ? 8 : 6;
+      }
+      doc.setTextColor(255, 0, 0);
+      doc.setFontSize(18);
+      doc.text("FiberBro", 14, y);
+      y += 8;
+      line("Internet Communication Services Corp.", 12, 40);
+      line("Payatas, Quezon City", 11, 80);
+      y += 4;
+      line("Statement of Account", 14, 20);
+      line(person.name || "Customer", 12, 20);
+      line("Account " + (person.account_number || "—"), 11, 60);
+      line("Plan: " + (person.plan_speed || person.plan || "—"), 11, 60);
+      if (person.address) line(person.address + (person.area ? ", " + person.area : ""), 11, 60);
+      y += 2;
+      line("Bills", 12, 20);
+      var billed = 0;
+      invoices.forEach(function (inv) {
+        if (inv.status !== "void") billed += Number(inv.amount) || 0;
+        var mark = inv.id === invoiceId ? "  < this invoice" : "";
+        line((inv.period || "") + "   " + money(inv.amount) + "   due " + (inv.due_date || "—") + "   " + inv.status + mark, 10, 40);
+      });
+      y += 2;
+      line("Payments", 12, 20);
+      var paid = 0;
+      payments.forEach(function (pay) {
+        if (pay.status === "confirmed") paid += Number(pay.amount) || 0;
+        line((pay.reference_no || pay.method || "Payment") + "   " + money(pay.amount) + "   " + (pay.method || "") + "   " + pay.status, 10, 40);
+      });
+      y += 2;
+      line("Balance " + money(billed - paid), 13, 180);
+      if (paid > billed) line("Wallet credit " + money(paid - billed), 12, 40);
+      doc.save("FiberBro-SOA-" + (person.account_number || "account") + ".pdf");
+    }).catch(function (error) { flash(errText(error)); });
+  }
+
+  function renderFinance() {
+    var gen = viewGen;
+    shell("<section class=\"panel\"><h1>Finance</h1><p class=\"muted\">Loading…</p></section>");
+    var monthNow = manilaPeriod();
+    Promise.all([
+      db.from("invoices").select("status, amount, period, paid_at"),
+      db.from("expenses").select("*").order("expense_date", { ascending: false }),
+      db.from("customers").select("id, installation_date"),
+      db.from("app_settings").select("key, value").eq("key", "installation_fee").maybeSingle()
+    ]).then(function (parts) {
+      if (gen !== viewGen) return;
+      if (parts[1].error) return flash("Expenses are not available yet. Apply supabase/migrations/20261119_finance_billing.sql. " + errText(parts[1].error));
+      var invoices = parts[0].error ? [] : (parts[0].data || []);
+      var expenses = parts[1].data || [];
+      var installs = parts[2].error ? [] : (parts[2].data || []);
+      var fee = 1000;
+      if (parts[3].data && Number(parts[3].data.value) > 0) fee = Number(parts[3].data.value);
+      var years = [];
+      function rememberYear(value) {
+        var year = String(value || "").slice(0, 4);
+        if (year && years.indexOf(year) === -1) years.push(year);
+      }
+      invoices.forEach(function (row) { rememberYear(row.period); });
+      expenses.forEach(function (row) { rememberYear(row.expense_date); });
+      if (years.indexOf(monthNow.slice(0, 4)) === -1) years.push(monthNow.slice(0, 4));
+      years.sort();
+      var categories = ["Gas", "Meals", "Materials", "Maintenance", "Office Supplies", "Transportation", "Repairs", "Others"];
+      function paint(month, year, category, status) {
+        var period = year && month ? year + "-" + month : "";
+        var sales = invoices.filter(function (row) {
+          return row.status === "paid" && (!year || String(row.period || "").slice(0, 4) === year) && (!month || String(row.period || "").slice(5, 7) === month);
+        }).reduce(function (sum, row) { return sum + Number(row.amount || 0); }, 0);
+        var installation = installs.filter(function (row) {
+          var stamp = String(row.installation_date || "");
+          return stamp && (!year || stamp.slice(0, 4) === year) && (!month || stamp.slice(5, 7) === month);
+        }).length * fee;
+        var shown = expenses.filter(function (row) {
+          var stamp = String(row.expense_date || "");
+          return (!year || stamp.slice(0, 4) === year) && (!month || stamp.slice(5, 7) === month) &&
+            (!category || row.category === category) && (!status || row.status === status);
+        });
+        var approvedSpend = shown.filter(function (row) { return row.status === "approved"; }).reduce(function (sum, row) { return sum + Number(row.amount || 0); }, 0);
+        var pending = expenses.filter(function (row) { return row.status === "pending"; });
+        var pendingTotal = pending.reduce(function (sum, row) { return sum + Number(row.amount || 0); }, 0);
+        var cards = [
+          ["Total sales", money(sales)],
+          ["Total installation", money(installation)],
+          ["Total expenses", money(approvedSpend)],
+          ["Net", money(sales + installation - approvedSpend)],
+          ["Pending approval", pending.length + " · " + money(pendingTotal)]
+        ].map(function (card) {
+          return "<article class=\"stat-card\"><div><p class=\"stat-label\">" + esc(card[0]) + "</p><p class=\"stat-value\">" + esc(card[1]) + "</p></div></article>";
+        }).join("");
+        var body = shown.map(function (row) {
+          return "<tr><td data-label=\"Date\">" + esc(row.expense_date || "") + "</td>" +
+            "<td data-label=\"Category\">" + esc(row.category) + "</td>" +
+            "<td data-label=\"Amount\">" + esc(money(row.amount)) + "</td>" +
+            "<td data-label=\"Remarks\">" + esc(row.remarks || "") + "</td>" +
+            "<td data-label=\"Status\">" + statusPill(row.status) + "</td>" +
+            "<td data-label=\"Receipt\">" + (row.receipt_path ? "<button type=\"button\" class=\"btn secondary\" data-receipt=\"" + esc(row.receipt_path) + "\">View</button>" : "—") + "</td>" +
+            "<td data-label=\"\">" + (row.status === "pending" ? "<button type=\"button\" class=\"btn\" data-approve=\"" + row.id + "\">Approve</button> <button type=\"button\" class=\"btn secondary\" data-deny=\"" + row.id + "\">Reject</button>" : esc(row.approved_by || "")) + "</td></tr>";
+        }).join("");
+        shell("<section class=\"panel\"><h1>Finance</h1><div class=\"stat-grid\">" + cards + "</div>" +
+          "<p class=\"muted\">Sales are paid invoices for the period. Installation is ₱" + esc(String(fee)) + " for each customer whose installation date is in that period. Net is sales plus installation minus approved expenses.</p>" +
+          "<div class=\"filters\"><select id=\"fin-month\">" + ["","01","02","03","04","05","06","07","08","09","10","11","12"].map(function (item) {
+            return "<option value=\"" + item + "\"" + (item === month ? " selected" : "") + ">" + (item || "All months") + "</option>";
+          }).join("") + "</select>" +
+          "<select id=\"fin-year\">" + ["",].concat(years).map(function (item) {
+            return "<option value=\"" + esc(item) + "\"" + (item === year ? " selected" : "") + ">" + (item || "All years") + "</option>";
+          }).join("") + "</select>" +
+          "<select id=\"fin-category\"><option value=\"\">All categories</option>" + categories.map(function (item) {
+            return "<option" + (item === category ? " selected" : "") + ">" + esc(item) + "</option>";
+          }).join("") + "</select>" +
+          "<select id=\"fin-status\"><option value=\"\">All statuses</option><option" + (status === "pending" ? " selected" : "") + ">pending</option><option" + (status === "approved" ? " selected" : "") + ">approved</option><option" + (status === "rejected" ? " selected" : "") + ">rejected</option></select>" +
+          "<button type=\"button\" class=\"btn\" id=\"add-expense\">Add expense</button></div>" +
+          "<div class=\"table-card\"><table><thead><tr><th>Date</th><th>Category</th><th>Amount</th><th>Remarks</th><th>Status</th><th>Receipt</th><th></th></tr></thead><tbody>" +
+          (body || "<tr><td colspan=\"7\">No expenses for this filter.</td></tr>") + "</tbody></table></div>" +
+          "<div id=\"expense-modal\" class=\"modal\" hidden><div class=\"modal-card\" role=\"dialog\" aria-labelledby=\"expense-title\">" +
+          "<h2 id=\"expense-title\">Add expense</h2><form id=\"expense-form\" class=\"grid\">" +
+          "<div class=\"field\"><label for=\"expense-category\">Category</label><select id=\"expense-category\" required>" + categories.map(function (item) { return "<option>" + esc(item) + "</option>"; }).join("") + "</select></div>" +
+          "<div class=\"field\"><label for=\"expense-amount\">Amount</label><input id=\"expense-amount\" type=\"number\" min=\"0\" step=\"0.01\" required></div>" +
+          "<div class=\"field\"><label for=\"expense-date\">Date</label><input id=\"expense-date\" type=\"date\" required value=\"" + new Date().toISOString().slice(0, 10) + "\"></div>" +
+          "<div class=\"field\"><label for=\"expense-remarks\">Remarks</label><textarea id=\"expense-remarks\"></textarea></div>" +
+          "<div class=\"field\"><label for=\"expense-receipt\">Receipt photo</label><input id=\"expense-receipt\" type=\"file\" accept=\"image/jpeg,image/png,image/webp\"></div>" +
+          "<div class=\"actions\"><button class=\"btn\" type=\"submit\">Save expense</button><button type=\"button\" class=\"btn secondary\" id=\"expense-read\">Read amount</button><button type=\"button\" class=\"btn secondary\" id=\"expense-cancel\">Cancel</button></div>" +
+          "</form></div></div></section>");
+        ["fin-month", "fin-year", "fin-category", "fin-status"].forEach(function (id) {
+          document.getElementById(id).onchange = function () {
+            paint(document.getElementById("fin-month").value, document.getElementById("fin-year").value, document.getElementById("fin-category").value, document.getElementById("fin-status").value);
+          };
+        });
+        document.getElementById("add-expense").onclick = function () { document.getElementById("expense-modal").hidden = false; };
+        document.getElementById("expense-cancel").onclick = function () { document.getElementById("expense-modal").hidden = true; };
+        document.getElementById("expense-read").onclick = readReceiptAmount;
+        document.getElementById("expense-form").onsubmit = function (event) {
+          event.preventDefault();
+          saveExpense().then(function (ok) { if (ok) renderFinance(); });
+        };
+        app.querySelectorAll("[data-approve], [data-deny]").forEach(function (button) {
+          button.onclick = function () {
+            var approving = button.hasAttribute("data-approve");
+            var id = button.getAttribute(approving ? "data-approve" : "data-deny");
+            db.from("expenses").update({
+              status: approving ? "approved" : "rejected",
+              approved_by: sessionEmail,
+              approved_at: new Date().toISOString()
+            }).eq("id", id).then(function (update) {
+              if (update.error) return flash(errText(update.error));
+              renderFinance();
+            });
+          };
+        });
+        app.querySelectorAll("[data-receipt]").forEach(function (button) {
+          button.onclick = function () {
+            db.storage.from("expense-receipts").createSignedUrl(button.getAttribute("data-receipt"), 3600).then(function (signed) {
+              if (signed.error || !signed.data) return flash(errText(signed.error));
+              window.open(signed.data.signedUrl, "_blank", "noopener");
+            });
+          };
+        });
+      }
+      paint(monthNow.slice(5, 7), monthNow.slice(0, 4), "", "");
+    }).catch(function (error) { flash(errText(error)); });
+  }
+
+  function receiptPath(file) {
+    var alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+    var rand = "";
+    var bytes = new Uint8Array(8);
+    if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
+    for (var i = 0; i < bytes.length; i++) rand += alphabet.charAt(bytes[i] % alphabet.length);
+    var ext = "jpg";
+    if (file && file.type === "image/png") ext = "png";
+    if (file && file.type === "image/webp") ext = "webp";
+    return "receipts/" + rand + "." + ext;
+  }
+
+  function saveExpense() {
+    var file = document.getElementById("expense-receipt").files[0];
+    var record = {
+      category: document.getElementById("expense-category").value,
+      amount: Number(document.getElementById("expense-amount").value),
+      expense_date: document.getElementById("expense-date").value,
+      remarks: document.getElementById("expense-remarks").value.trim() || null,
+      status: "pending",
+      created_by: sessionEmail
+    };
+    var upload = Promise.resolve(null);
+    if (file) {
+      var path = receiptPath(file);
+      upload = db.storage.from("expense-receipts").upload(path, file, { contentType: file.type || "image/jpeg", upsert: false }).then(function (result) {
+        if (result.error) throw result.error;
+        return path;
+      });
+    }
+    return upload.then(function (path) {
+      if (path) record.receipt_path = path;
+      return db.from("expenses").insert(record);
+    }).then(function (insert) {
+      if (insert.error) { flash(errText(insert.error)); return false; }
+      flash("Expense saved.", true);
+      return true;
+    }).catch(function (error) { flash(errText(error)); return false; });
+  }
+
+  function readReceiptAmount() {
+    var file = document.getElementById("expense-receipt").files[0];
+    if (!file) return flash("Choose a receipt photo first.");
+    flash("Reading the receipt…", true);
+    loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js").then(function () {
+      if (!window.Tesseract) throw new Error("Receipt reader did not load.");
+      return window.Tesseract.recognize(file, "eng");
+    }).then(function (result) {
+      var text = (result && result.data && result.data.text) || "";
+      var matches = text.match(/\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+\.\d{2}/g) || [];
+      var best = 0;
+      matches.forEach(function (item) {
+        var num = Number(String(item).replace(/,/g, ""));
+        if (num > best && num < 1000000) best = num;
+      });
+      if (!best) return flash("No amount was found. Type it in.");
+      document.getElementById("expense-amount").value = best.toFixed(2);
+      flash("Amount filled from the receipt. You can edit it.", true);
+    }).catch(function (error) { flash(errText(error)); });
   }
 
   function proofThumb(path, target) {
@@ -1682,7 +2182,9 @@
         ["gcash_number", "GCash number"],
         ["gcash_name", "GCash name"],
         ["gcash_qr_url", "GCash QR image URL"],
-        ["payment_note", "Payment note"]
+        ["payment_note", "Payment note"],
+        ["grace_days", "Grace period (days)"],
+        ["installation_fee", "Installation fee (₱)"]
       ];
       var values = {};
       (result.data || []).forEach(function (row) { values[row.key] = row.value || ""; });
@@ -1697,10 +2199,11 @@
       document.getElementById("settings-form").onsubmit = function (event) {
         event.preventDefault();
         var writes = fields.map(function (field) {
+          var privateSetting = field[0] === "grace_days" || field[0] === "installation_fee";
           return db.from("app_settings").upsert({
             key: field[0],
             value: document.getElementById("set-" + field[0]).value,
-            is_public: true,
+            is_public: !privateSetting,
             updated_at: new Date().toISOString()
           });
         });
@@ -1829,6 +2332,7 @@
     if (current.name === "tickets") return renderTickets();
     if (current.name === "admins") return renderAdmins();
     if (current.name === "billing") return renderBilling();
+    if (current.name === "finance") return renderFinance();
     if (current.name === "payments") return renderPayments();
     if (current.name === "map") return renderMap();
     if (current.name === "repairs") return renderRepairs();
