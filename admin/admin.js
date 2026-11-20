@@ -54,8 +54,7 @@
       ["plan_status", "Plan Status", "text"]
     ]},
     { title: "Billing", fields: [
-      ["due_date_number", "Due Date Number", "int"],
-      ["due_day", "Due day of month", "int"],
+      ["due_date_number", "Due day of month", "int"],
       ["original_due_date", "Original Due Date", "date"],
       ["monthly_bill", "Monthly Bill", "money"],
       ["current_bill", "Current Bill", "money"],

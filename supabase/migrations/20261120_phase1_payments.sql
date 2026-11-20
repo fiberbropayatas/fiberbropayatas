@@ -11,9 +11,9 @@
 --
 -- Bills: generate_upcoming_bills() creates a monthly invoice when today is
 -- within 10 days before the customer's due date (due day 29–31 clamps to the
--- last day of the month). The admin dashboard calls it once per day.
--- pg_cron is scheduled only when that extension is already installed
--- (often unavailable on the free tier). Period stays YYYY-MM. period_label
+-- last day of the month). It requires an admin. The dashboard calls it once
+-- per day. pg_cron, when installed, calls generate_upcoming_bills_job()
+-- because a cron session has no admin JWT. Period stays YYYY-MM. period_label
 -- is Mon_YYYY (Nov_2026). bill_number is FBROPAY-BILL plus 10 digits.
 -- previous_balance is a snapshot of older open bills, not added into amount.
 --
@@ -24,25 +24,11 @@ insert into public.app_settings (key, value, is_public) values
   ('account_number_format', 'FBRO{CODE2}{SEQ7}', false)
 on conflict (key) do nothing;
 
-alter table public.customers add column if not exists due_day integer;
-
+-- customers.due_date_number is the existing due day of month. Do not add due_day.
 update public.customers
-set due_day = extract(day from installation_date)::integer
-where due_day is null
+set due_date_number = extract(day from installation_date)::integer
+where due_date_number is null
   and installation_date is not null;
-
-do $$
-begin
-  if not exists (
-    select 1 from pg_constraint
-    where conname = 'customers_due_day_check'
-      and conrelid = 'public.customers'::regclass
-  ) then
-    alter table public.customers
-      add constraint customers_due_day_check
-      check (due_day is null or (due_day between 1 and 31));
-  end if;
-end $$;
 
 alter table public.invoices add column if not exists bill_number text;
 alter table public.invoices add column if not exists period_label text;
@@ -248,15 +234,15 @@ begin
     new.stage := 'inquiry';
   end if;
 
-  new.email_address := coalesce(new.email_address, new.email);
-  new.fb_account := coalesce(new.fb_account, new.facebook_name);
+  new.email_address := coalesce(nullif(btrim(new.email_address), ''), new.email);
+  new.fb_account := coalesce(nullif(btrim(new.fb_account), ''), new.facebook_name);
 
   if new.account_number is null or btrim(new.account_number) = '' then
     new.account_number := public.next_fiberbro_account(new.investor_id);
   end if;
 
-  if new.due_day is null and new.installation_date is not null then
-    new.due_day := extract(day from new.installation_date)::integer;
+  if new.due_date_number is null and new.installation_date is not null then
+    new.due_date_number := extract(day from new.installation_date)::integer;
   end if;
 
   new.account_status := public.stage_label(new.stage);
@@ -271,8 +257,8 @@ security definer
 set search_path = public
 as $$
 begin
-  if new.due_day is null and new.installation_date is not null then
-    new.due_day := extract(day from new.installation_date)::integer;
+  if new.due_date_number is null and new.installation_date is not null then
+    new.due_date_number := extract(day from new.installation_date)::integer;
   end if;
   return new;
 end;
@@ -280,11 +266,11 @@ $$;
 
 drop trigger if exists customers_fill_due_day on public.customers;
 create trigger customers_fill_due_day
-  before insert or update of installation_date, due_day on public.customers
+  before insert or update of installation_date, due_date_number on public.customers
   for each row execute function public.customers_fill_due_day();
 
-create or replace function public.sync_invoice_from_payment()
-returns trigger
+create or replace function public.apply_invoice_payment_state(p_invoice uuid)
+returns void
 language plpgsql
 security definer
 set search_path = public
@@ -295,37 +281,87 @@ declare
   paid_sum numeric;
   waiting boolean;
 begin
-  if new.invoice_id is null then
-    return new;
+  if p_invoice is null then
+    return;
   end if;
   select amount, status into bill_amount, bill_status
-  from public.invoices where id = new.invoice_id;
+  from public.invoices where id = p_invoice;
   if bill_status = 'void' or bill_amount is null then
-    return new;
+    return;
   end if;
   select coalesce(sum(amount), 0) into paid_sum
   from public.payments
-  where invoice_id = new.invoice_id and status = 'confirmed';
+  where invoice_id = p_invoice and status = 'confirmed';
   select exists (
     select 1 from public.payments
-    where invoice_id = new.invoice_id and status = 'pending'
+    where invoice_id = p_invoice and status = 'pending'
   ) into waiting;
   if paid_sum + 0.009 >= bill_amount then
     update public.invoices
       set status = 'paid', paid_at = coalesce(paid_at, now())
-      where id = new.invoice_id;
+      where id = p_invoice;
   elsif paid_sum > 0 or waiting then
     update public.invoices
       set status = 'pending', paid_at = null
-      where id = new.invoice_id;
+      where id = p_invoice;
   else
     update public.invoices
       set status = 'unpaid', paid_at = null
-      where id = new.invoice_id;
+      where id = p_invoice;
+  end if;
+end;
+$$;
+
+-- The deployed payments_sync_invoice trigger is BEFORE the row is visible.
+-- Summing payments from the table in that trigger misses the row being saved.
+-- Stamp confirmation on BEFORE, then recompute the bill AFTER the row is stored.
+create or replace function public.stamp_payment_confirmation()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.status = 'confirmed' and (tg_op = 'INSERT' or old.status is distinct from 'confirmed') then
+    if new.confirmed_at is null then
+      new.confirmed_at := now();
+    end if;
+    if new.confirmed_by is null or btrim(new.confirmed_by) = '' then
+      new.confirmed_by := coalesce(nullif(auth.jwt() ->> 'email', ''), 'system');
+    end if;
   end if;
   return new;
 end;
 $$;
+
+create or replace function public.sync_invoice_from_payment()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op = 'DELETE' then
+    perform public.apply_invoice_payment_state(old.invoice_id);
+    return old;
+  end if;
+  perform public.apply_invoice_payment_state(new.invoice_id);
+  if tg_op = 'UPDATE' and old.invoice_id is distinct from new.invoice_id then
+    perform public.apply_invoice_payment_state(old.invoice_id);
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists payments_stamp_confirmation on public.payments;
+create trigger payments_stamp_confirmation
+  before insert or update of status on public.payments
+  for each row execute function public.stamp_payment_confirmation();
+
+drop trigger if exists payments_sync_invoice on public.payments;
+create trigger payments_sync_invoice
+  after insert or update of status, amount, invoice_id on public.payments
+  for each row execute function public.sync_invoice_from_payment();
 
 create or replace function public.next_bill_number()
 returns text
@@ -345,7 +381,7 @@ begin
 end;
 $$;
 
-create or replace function public.generate_upcoming_bills()
+create or replace function public.generate_upcoming_bills_job()
 returns integer
 language plpgsql
 security definer
@@ -362,7 +398,7 @@ declare
   fee numeric;
 begin
   for cust in
-    select c.id, c.due_day, c.installation_date, c.monthly_bill, c.price
+    select c.id, c.due_date_number, c.installation_date, c.monthly_bill, c.price
     from public.customers c
     where c.stage = 'active'
   loop
@@ -370,7 +406,7 @@ begin
       due_on := public.clamp_due_date(
         extract(year from (current_date + make_interval(months => step)))::integer,
         extract(month from (current_date + make_interval(months => step)))::integer,
-        coalesce(cust.due_day, extract(day from cust.installation_date)::integer, 1)
+        coalesce(cust.due_date_number, extract(day from cust.installation_date)::integer, 1)
       );
       if current_date < due_on - 10 or current_date > due_on + 5 then
         continue;
@@ -410,6 +446,20 @@ begin
     end loop;
   end loop;
   return inserted_count;
+end;
+$$;
+
+create or replace function public.generate_upcoming_bills()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only an admin can generate bills.';
+  end if;
+  return public.generate_upcoming_bills_job();
 end;
 $$;
 
@@ -734,23 +784,23 @@ begin
     if btrim(raw_line) = '' then
       continue;
     end if;
-    txn := substring(raw_line from '(\\d{4}-\\d{2}-\\d{2})')::date;
+    txn := substring(raw_line from '(\d{4}-\d{2}-\d{2})')::date;
     if txn is null then
       begin
-        txn := to_date(substring(raw_line from '([A-Za-z]{3}\\s+\\d{1,2},\\s+\\d{4})'), 'Mon DD, YYYY');
+        txn := to_date(substring(raw_line from '([A-Za-z]{3}\s+\d{1,2},\s+\d{4})'), 'Mon DD, YYYY');
       exception when others then
         txn := null;
       end;
     end if;
-    cleaned := regexp_replace(raw_line, '\\d{4}-\\d{2}-\\d{2}', ' ', 'g');
-    cleaned := regexp_replace(cleaned, '[A-Za-z]{3}\\s+\\d{1,2},\\s+\\d{4}', ' ', 'g');
-    amt := substring(replace(cleaned, ',', '') from '(\\d+\\.\\d{2})\\s*$')::numeric;
+    cleaned := regexp_replace(raw_line, '\d{4}-\d{2}-\d{2}', ' ', 'g');
+    cleaned := regexp_replace(cleaned, '[A-Za-z]{3}\s+\d{1,2},\s+\d{4}', ' ', 'g');
+    amt := substring(replace(cleaned, ',', '') from '(\d+\.\d{2})\s*$')::numeric;
     if amt is not null then
-      cleaned := regexp_replace(cleaned, '\\d+\\.\\d{2}\\s*$', ' ');
+      cleaned := regexp_replace(cleaned, '\d+\.\d{2}\s*$', ' ');
     else
-      amt := substring(replace(cleaned, ',', '') from '(\\d+)\\s*$')::numeric;
+      amt := substring(replace(cleaned, ',', '') from '(\d+)\s*$')::numeric;
       if amt is not null then
-        cleaned := regexp_replace(cleaned, '\\d+\\s*$', ' ');
+        cleaned := regexp_replace(cleaned, '\d+\s*$', ' ');
       end if;
     end if;
     norm := public.normalize_gcash_ref(cleaned);
@@ -904,7 +954,7 @@ begin
       'area', cust.area,
       'mobile', coalesce(nullif(cust.mobile, ''), cust.contact_number),
       'wallet_credit', coalesce(cust.wallet_credit, 0),
-      'due_day', cust.due_day
+      'due_date_number', cust.due_date_number
     ),
     'invoices', coalesce((
       select json_agg(json_build_object(
@@ -971,6 +1021,9 @@ revoke all on function public.collection_cutoff(date) from public;
 revoke all on function public.clamp_due_date(integer, integer, integer) from public;
 revoke all on function public.next_fiberbro_account(uuid) from public;
 revoke all on function public.next_bill_number() from public;
+revoke all on function public.apply_invoice_payment_state(uuid) from public;
+revoke all on function public.stamp_payment_confirmation() from public;
+revoke all on function public.generate_upcoming_bills_job() from public;
 revoke all on function public.generate_upcoming_bills() from public;
 revoke all on function public.auto_match_logbook(uuid) from public;
 revoke all on function public.add_gcash_refs(uuid, text) from public;
@@ -995,7 +1048,7 @@ begin
     perform cron.schedule(
       'fiberbro_generate_bills',
       '15 16 * * *',
-      'select public.generate_upcoming_bills()'
+      'select public.generate_upcoming_bills_job()'
     );
   end if;
 exception when others then
