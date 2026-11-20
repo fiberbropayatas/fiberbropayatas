@@ -399,6 +399,12 @@
       ["investors", "Investors", "investors"],
       ["technicians", "Technicians", "technicians"]
     ]],
+    ["Payroll", [
+      ["employees", "Employees", "technicians"],
+      ["dtr", "DTR", "tickets"],
+      ["adjustments", "Adjustments", "billing"],
+      ["payroll", "Payroll", "payments"]
+    ]],
     ["System", [
       ["settings", "Settings", "settings"],
       ["admins", "Admins", "admins"]
@@ -421,6 +427,10 @@
     ops: "Tickets",
     staff: "Staff",
     modems: "Modems",
+    employees: "Employees",
+    dtr: "DTR",
+    adjustments: "Adjustments",
+    payroll: "Payroll",
     settings: "Settings",
     admins: "Admins"
   };
@@ -557,7 +567,7 @@
     setChrome("guest");
     if (who) who.innerHTML = "";
     if (pageTitle) pageTitle.textContent = "Sign in";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261121b\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261121b\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261122b\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261122b\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -3443,6 +3453,329 @@
     });
   }
 
+  function manilaToday() {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  }
+
+  function cutoffRange(iso) {
+    var day = Number(String(iso || manilaToday()).slice(8, 10));
+    var start = String(iso).slice(0, 8) + (day <= 15 ? "01" : "16");
+    if (day <= 15) return { start: start, end: String(iso).slice(0, 8) + "15" };
+    var date = new Date(String(iso).slice(0, 8) + "01T00:00:00");
+    date.setMonth(date.getMonth() + 1);
+    date.setDate(0);
+    var end = date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
+    return { start: start, end: end };
+  }
+
+  function renderEmployees() {
+    var gen = viewGen;
+    shell("<section class=\"panel\"><h1>Employees</h1><p class=\"muted\">Loading…</p></section>");
+    Promise.all([
+      db.from("employees").select("*").order("name"),
+      db.from("staff").select("id, name, email, role").eq("active", true).order("name")
+    ]).then(function (parts) {
+      if (gen !== viewGen) return;
+      if (parts[0].error) return flash("Employees are not ready. Apply supabase/migrations/20261122_phase3_payroll.sql. " + errText(parts[0].error));
+      var rows = parts[0].data || [];
+      var staff = parts[1].error ? [] : (parts[1].data || []);
+      var body = rows.map(function (row) {
+        return "<tr><td>" + esc(row.name) + "</td><td>" + esc(row.position || "") + "</td><td>" + esc(row.rate_type) + "</td><td>" + esc(money(row.monthly_rate)) + "</td><td>" + esc(String(row.shift_start).slice(0, 5)) + "–" + esc(String(row.shift_end).slice(0, 5)) + "</td><td>" + (row.active ? "Yes" : "No") + "</td></tr>";
+      }).join("");
+      shell("<section class=\"panel\"><h1>Employees</h1><p class=\"muted\">Daily rate is monthly ÷ 26. Shift default is 9:00–18:00. Rest day 0 is Sunday. Enroll the face on this page, then the office phone uses <a href=\"/kiosk/\">/kiosk/</a>.</p>" +
+        "<form id=\"emp-form\" class=\"grid two\">" +
+        "<div class=\"field\"><label>Name</label><input id=\"emp-name\" required></div>" +
+        "<div class=\"field\"><label>Position</label><input id=\"emp-position\"></div>" +
+        "<div class=\"field\"><label>Rate</label><select id=\"emp-rate\"><option value=\"regular\">regular</option><option value=\"fixed\">fixed</option></select></div>" +
+        "<div class=\"field\"><label>Monthly rate</label><input id=\"emp-monthly\" type=\"number\" min=\"0\" step=\"0.01\" required></div>" +
+        "<div class=\"field\"><label>Shift start</label><input id=\"emp-start\" type=\"time\" value=\"09:00\"></div>" +
+        "<div class=\"field\"><label>Shift end</label><input id=\"emp-end\" type=\"time\" value=\"18:00\"></div>" +
+        "<div class=\"field\"><label>Rest day</label><select id=\"emp-rest\"><option value=\"0\">Sunday</option><option value=\"1\">Monday</option><option value=\"2\">Tuesday</option><option value=\"3\">Wednesday</option><option value=\"4\">Thursday</option><option value=\"5\">Friday</option><option value=\"6\">Saturday</option></select></div>" +
+        "<div class=\"field\"><label>Staff link</label><select id=\"emp-staff\"><option value=\"\">None</option>" + staff.map(function (row) {
+          return "<option value=\"" + row.id + "\">" + esc(row.name) + " · " + esc(row.role) + "</option>";
+        }).join("") + "</select></div>" +
+        "<button class=\"btn\" type=\"submit\">Save employee</button></form>" +
+        "<div class=\"actions\"><button type=\"button\" class=\"btn secondary\" id=\"kiosk-reg\">Register office phone</button></div>" +
+        "<p id=\"kiosk-token\" class=\"muted\"></p></section>" +
+        "<div class=\"table-wrap\"><table><thead><tr><th>Name</th><th>Position</th><th>Rate</th><th>Monthly</th><th>Shift</th><th>Active</th></tr></thead><tbody>" +
+        (body || "<tr><td colspan=\"6\">No employees yet.</td></tr>") + "</tbody></table></div>" +
+        "<section class=\"panel\"><h2>Enroll face</h2><form id=\"face-form\" class=\"grid\">" +
+        "<div class=\"field\"><label>Employee</label><select id=\"face-emp\">" + rows.map(function (row) { return "<option value=\"" + row.id + "\">" + esc(row.name) + "</option>"; }).join("") + "</select></div>" +
+        "<video id=\"face-video\" autoplay playsinline width=\"320\" hidden></video>" +
+        "<div class=\"actions\"><button type=\"button\" class=\"btn secondary\" id=\"face-cam\">Open camera</button><button class=\"btn\" type=\"submit\">Save face</button></div></form></section>");
+      document.getElementById("emp-form").onsubmit = function (event) {
+        event.preventDefault();
+        db.rpc("save_employee", {
+          p_id: null,
+          p_name: document.getElementById("emp-name").value.trim(),
+          p_position: document.getElementById("emp-position").value.trim(),
+          p_rate_type: document.getElementById("emp-rate").value,
+          p_monthly: Number(document.getElementById("emp-monthly").value),
+          p_shift_start: document.getElementById("emp-start").value,
+          p_shift_end: document.getElementById("emp-end").value,
+          p_rest: Number(document.getElementById("emp-rest").value),
+          p_staff: document.getElementById("emp-staff").value || null,
+          p_active: true
+        }).then(function (result) {
+          if (result.error) return flash(errText(result.error));
+          flash("Employee saved.", true);
+          renderEmployees();
+        });
+      };
+      document.getElementById("kiosk-reg").onclick = function () {
+        db.rpc("register_kiosk_device", { p_name: "Office phone" }).then(function (result) {
+          if (result.error) return flash(errText(result.error));
+          document.getElementById("kiosk-token").textContent = "Token (copy once): " + ((result.data && result.data.token) || "");
+        });
+      };
+      var video = document.getElementById("face-video");
+      document.getElementById("face-cam").onclick = function () {
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } }).then(function (stream) {
+          video.hidden = false;
+          video.srcObject = stream;
+        }).catch(function (error) { flash(errText(error)); });
+      };
+      document.getElementById("face-form").onsubmit = function (event) {
+        event.preventDefault();
+        if (!video.srcObject) return flash("Open the camera first.");
+        loadScript("https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js").then(function () {
+          var weights = "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights";
+          var api = window.faceapi;
+          if (!api) throw new Error("Face library did not load.");
+          return Promise.all([
+            api.nets.tinyFaceDetector.loadFromUri(weights),
+            api.nets.faceLandmark68TinyNet.loadFromUri(weights),
+            api.nets.faceRecognitionNet.loadFromUri(weights)
+          ]).then(function () { return api; });
+        }).then(function (api) {
+          return api.detectSingleFace(video, new api.TinyFaceDetectorOptions()).withFaceLandmarks(true).withFaceDescriptor();
+        }).then(function (found) {
+          if (!found) return flash("No face in the camera.");
+          return db.rpc("enroll_employee_face", {
+            p_employee: document.getElementById("face-emp").value,
+            p_descriptor: Array.from(found.descriptor)
+          });
+        }).then(function (result) {
+          if (!result) return;
+          if (result.error) return flash(errText(result.error));
+          flash("Face enrolled.", true);
+        }).catch(function (error) { flash(errText(error)); });
+      };
+    });
+  }
+
+  function renderDtr() {
+    var gen = viewGen;
+    var range = cutoffRange(manilaToday());
+    shell("<section class=\"panel\"><h1>DTR</h1><p class=\"muted\">Loading…</p></section>");
+    db.from("employees").select("id, name").eq("active", true).order("name").then(function (result) {
+      if (gen !== viewGen) return;
+      if (result.error) return flash(errText(result.error));
+      var people = result.data || [];
+      shell("<section class=\"panel\"><h1>DTR</h1><form id=\"dtr-form\" class=\"grid two\">" +
+        "<div class=\"field\"><label>Employee</label><select id=\"dtr-emp\">" + people.map(function (row) { return "<option value=\"" + row.id + "\">" + esc(row.name) + "</option>"; }).join("") + "</select></div>" +
+        "<div class=\"field\"><label>From</label><input id=\"dtr-start\" type=\"date\" value=\"" + range.start + "\"></div>" +
+        "<div class=\"field\"><label>To</label><input id=\"dtr-end\" type=\"date\" value=\"" + range.end + "\"></div>" +
+        "<button class=\"btn\" type=\"submit\">Show</button></form><div id=\"dtr-out\"></div></section>");
+      function show() {
+        var id = document.getElementById("dtr-emp").value;
+        var start = document.getElementById("dtr-start").value;
+        var end = document.getElementById("dtr-end").value;
+        Promise.all([
+          db.from("attendance_punches").select("*").eq("employee_id", id).gte("work_date", start).lte("work_date", end).order("work_date").order("punched_at"),
+          db.from("attendance_days").select("*").eq("employee_id", id).gte("work_date", start).lte("work_date", end)
+        ]).then(function (parts) {
+          if (parts[0].error) return flash(errText(parts[0].error));
+          var punches = parts[0].data || [];
+          var days = parts[1].error ? [] : (parts[1].data || []);
+          var body = punches.map(function (row) {
+            return "<tr><td>" + esc(row.work_date) + "</td><td>" + esc(row.punch_type) + "</td><td>" + esc(manilaTime(row.punched_at)) + "</td><td>" + esc(row.source) + "</td><td>" + esc(row.reason || "") + "</td>" +
+              "<td><button type=\"button\" class=\"btn secondary\" data-selfie=\"" + row.id + "\">Selfie</button></td></tr>";
+          }).join("");
+          document.getElementById("dtr-out").innerHTML = "<div class=\"table-wrap\"><table><thead><tr><th>Date</th><th>Punch</th><th>Time</th><th>Source</th><th>Reason</th><th></th></tr></thead><tbody>" +
+            (body || "<tr><td colspan=\"6\">No punches in this cut-off.</td></tr>") + "</tbody></table></div>" +
+            "<h2>Manual punch</h2><form id=\"man-form\" class=\"grid two\">" +
+            "<div class=\"field\"><label>Date</label><input id=\"man-date\" type=\"date\" value=\"" + start + "\" required></div>" +
+            "<div class=\"field\"><label>Type</label><select id=\"man-type\"><option value=\"clock_in\">clock in</option><option value=\"lunch_out\">lunch out</option><option value=\"lunch_in\">lunch in</option><option value=\"clock_out\">clock out</option></select></div>" +
+            "<div class=\"field\"><label>Time</label><input id=\"man-time\" type=\"datetime-local\" required></div>" +
+            "<div class=\"field\"><label>Reason</label><input id=\"man-reason\" required></div>" +
+            "<button class=\"btn\" type=\"submit\">Save manual punch</button></form>" +
+            "<h2>Half day and OT</h2><form id=\"day-form\" class=\"grid two\">" +
+            "<div class=\"field\"><label>Date</label><input id=\"day-date\" type=\"date\" value=\"" + start + "\"></div>" +
+            "<div class=\"field check\"><input id=\"day-half\" type=\"checkbox\"><label for=\"day-half\">Half day</label></div>" +
+            "<div class=\"field\"><label>Reason</label><input id=\"day-reason\"></div>" +
+            "<div class=\"field\"><label>OT hours</label><input id=\"day-ot\" type=\"number\" min=\"0\" step=\"0.25\" value=\"0\"></div>" +
+            "<div class=\"field check\"><input id=\"day-approve\" type=\"checkbox\"><label for=\"day-approve\">Approve OT (admin)</label></div>" +
+            "<button class=\"btn\" type=\"submit\">Save day</button></form>" +
+            "<p class=\"muted\">Days with a saved half-day flag: " + days.filter(function (row) { return row.half_day; }).map(function (row) { return row.work_date; }).join(", ") + "</p>";
+          document.getElementById("man-form").onsubmit = function (event) {
+            event.preventDefault();
+            db.rpc("manual_attendance", {
+              p_employee: id,
+              p_date: document.getElementById("man-date").value,
+              p_type: document.getElementById("man-type").value,
+              p_at: new Date(document.getElementById("man-time").value).toISOString(),
+              p_reason: document.getElementById("man-reason").value.trim(),
+              p_selfie: null
+            }).then(function (saved) {
+              if (saved.error) return flash(errText(saved.error));
+              flash("Manual punch saved.", true);
+              show();
+            });
+          };
+          document.getElementById("day-form").onsubmit = function (event) {
+            event.preventDefault();
+            db.rpc("save_attendance_day", {
+              p_employee: id,
+              p_date: document.getElementById("day-date").value,
+              p_half: document.getElementById("day-half").checked,
+              p_half_reason: document.getElementById("day-reason").value.trim(),
+              p_ot_hours: Number(document.getElementById("day-ot").value || 0),
+              p_approve: document.getElementById("day-approve").checked
+            }).then(function (saved) {
+              if (saved.error) return flash(errText(saved.error));
+              flash("Day saved.", true);
+              show();
+            });
+          };
+          document.getElementById("dtr-out").querySelectorAll("[data-selfie]").forEach(function (button) {
+            button.onclick = function () {
+              db.from("attendance_photos").select("content_type, image_base64").eq("punch_id", button.getAttribute("data-selfie")).order("created_at", { ascending: false }).limit(1).then(function (photo) {
+                if (photo.error) return flash(errText(photo.error));
+                var row = (photo.data || [])[0];
+                if (!row) return flash("No selfie stored.");
+                window.open("data:" + (row.content_type || "image/jpeg") + ";base64," + row.image_base64, "_blank", "noopener");
+              });
+            };
+          });
+        });
+      }
+      document.getElementById("dtr-form").onsubmit = function (event) { event.preventDefault(); show(); };
+      if (people.length) show();
+    });
+  }
+
+  function renderAdjustments() {
+    var gen = viewGen;
+    shell("<section class=\"panel\"><h1>Adjustments</h1><p class=\"muted\">Loading…</p></section>");
+    db.from("employees").select("id, name").eq("active", true).order("name").then(function (result) {
+      if (gen !== viewGen) return;
+      if (result.error) return flash(errText(result.error));
+      var options = (result.data || []).map(function (row) { return "<option value=\"" + row.id + "\">" + esc(row.name) + "</option>"; }).join("");
+      shell("<section class=\"panel\"><h1>Cash advance, incentive, gas, violation</h1>" +
+        "<form id=\"adj-form\" class=\"grid two\">" +
+        "<div class=\"field\"><label>Kind</label><select id=\"adj-kind\"><option value=\"cash_advance\">Cash advance</option><option value=\"incentive\">Incentive</option><option value=\"gas\">Gas</option><option value=\"violation\">Violation</option></select></div>" +
+        "<div class=\"field\"><label>Employee</label><select id=\"adj-emp\">" + options + "</select></div>" +
+        "<div class=\"field\"><label>Amount</label><input id=\"adj-amount\" type=\"number\" min=\"0\" step=\"0.01\" required></div>" +
+        "<div class=\"field\"><label>Date</label><input id=\"adj-date\" type=\"date\" value=\"" + manilaToday() + "\"></div>" +
+        "<div class=\"field\"><label>Note</label><input id=\"adj-note\"></div>" +
+        "<div class=\"field check\"><input id=\"adj-deduct\" type=\"checkbox\"><label for=\"adj-deduct\">Deduct gas from pay</label></div>" +
+        "<button class=\"btn\" type=\"submit\">Save</button></form></section>");
+      document.getElementById("adj-form").onsubmit = function (event) {
+        event.preventDefault();
+        db.rpc("add_payroll_adjustment", {
+          p_kind: document.getElementById("adj-kind").value,
+          p_employee: document.getElementById("adj-emp").value,
+          p_amount: Number(document.getElementById("adj-amount").value),
+          p_date: document.getElementById("adj-date").value,
+          p_note: document.getElementById("adj-note").value.trim(),
+          p_deduct: document.getElementById("adj-deduct").checked
+        }).then(function (saved) {
+          if (saved.error) return flash(errText(saved.error));
+          flash("Saved.", true);
+        });
+      };
+    });
+  }
+
+  function printPayslip(row, run) {
+    loadScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js").then(function () {
+      var JsPDF = window.jspdf && window.jspdf.jsPDF;
+      if (!JsPDF) return flash("Could not load the PDF library.");
+      var doc = new JsPDF();
+      var lines = [
+        "FiberBro payslip",
+        (run.cutoff_start || "") + " to " + (run.cutoff_end || ""),
+        row.employees ? row.employees.name : "",
+        "Rate " + row.rate_type + "  Monthly " + row.monthly_rate + "  Daily " + row.daily_rate,
+        "Days " + row.days_present + "  Half days " + row.half_days + "  OT hours " + row.ot_hours,
+        "OT pay " + row.ot_pay + "  Incentive " + row.incentives,
+        "Earnings " + row.earnings,
+        "Late " + row.late_penalty + "  Cash advance " + row.cash_advance + "  Other " + row.other_deductions,
+        "Net " + row.net_pay
+      ];
+      doc.setFontSize(12);
+      lines.forEach(function (line, index) { doc.text(String(line), 14, 20 + index * 8); });
+      doc.save("payslip-" + (row.employees && row.employees.name ? row.employees.name : row.employee_id) + ".pdf");
+    }).catch(function (error) { flash(errText(error)); });
+  }
+
+  function renderPayroll() {
+    var gen = viewGen;
+    var range = cutoffRange(manilaToday());
+    shell("<section class=\"panel\"><h1>Payroll</h1><form id=\"pay-form\" class=\"grid two\">" +
+      "<div class=\"field\"><label>Cut-off start</label><input id=\"pay-start\" type=\"date\" value=\"" + range.start + "\"></div>" +
+      "<div class=\"field\"><label>Cut-off end</label><input id=\"pay-end\" type=\"date\" value=\"" + range.end + "\"></div>" +
+      "<button class=\"btn\" type=\"submit\">Build draft</button></form>" +
+      "<p class=\"muted\">Regular pay = daily × (days present − 0.5 × half days) + OT + incentive. Fixed = monthly ÷ 2 for the cut-off, plus OT and incentive. Net subtracts late, cash advance, and other deductions. 0–14 min late is free. Each full 15 min is ₱30. Two hours late is a half day with no late penalty.</p>" +
+      "<div id=\"pay-out\"></div></section>");
+    function load(start, end) {
+      db.from("payroll_runs").select("*").eq("cutoff_start", start).eq("cutoff_end", end).maybeSingle().then(function (runResult) {
+        if (runResult.error) return flash(errText(runResult.error));
+        var run = runResult.data;
+        if (!run) {
+          document.getElementById("pay-out").innerHTML = "<p>No draft for this cut-off yet.</p>";
+          return;
+        }
+        db.from("payslips").select("*, employees(name, position)").eq("run_id", run.id).order("employee_id").then(function (slips) {
+          if (slips.error) return flash(errText(slips.error));
+          var body = (slips.data || []).map(function (row) {
+            var person = row.employees || {};
+            return "<tr><td>" + esc(person.name || "") + "</td><td>" + esc(row.rate_type) + "</td><td>" + esc(row.days_present) + "</td><td>" + esc(row.half_days) + "</td><td>" + esc(money(row.earnings)) + "</td><td>" + esc(money(row.late_penalty)) + "</td><td>" + esc(money(row.net_pay)) + "</td>" +
+              "<td><button type=\"button\" class=\"btn secondary\" data-print=\"" + row.id + "\">PDF</button></td></tr>";
+          }).join("");
+          document.getElementById("pay-out").innerHTML = "<p>Status: " + esc(run.status) + "</p>" +
+            (run.status === "draft" ? "<button type=\"button\" class=\"btn\" id=\"pay-lock\">Lock cut-off</button>" : "<button type=\"button\" class=\"btn secondary\" id=\"pay-unlock\">Unlock</button>") +
+            "<div class=\"table-wrap\"><table><thead><tr><th>Employee</th><th>Rate</th><th>Days</th><th>Half</th><th>Earnings</th><th>Late</th><th>Net</th><th></th></tr></thead><tbody>" +
+            (body || "<tr><td colspan=\"8\">No payslips.</td></tr>") + "</tbody></table></div>";
+          var lock = document.getElementById("pay-lock");
+          if (lock) lock.onclick = function () {
+            db.rpc("lock_payroll", { p_run: run.id }).then(function (saved) {
+              if (saved.error) return flash(errText(saved.error));
+              flash("Locked.", true);
+              load(start, end);
+            });
+          };
+          var unlock = document.getElementById("pay-unlock");
+          if (unlock) unlock.onclick = function () {
+            db.rpc("unlock_payroll", { p_run: run.id }).then(function (saved) {
+              if (saved.error) return flash(errText(saved.error));
+              flash("Unlocked.", true);
+              load(start, end);
+            });
+          };
+          document.getElementById("pay-out").querySelectorAll("[data-print]").forEach(function (button) {
+            button.onclick = function () {
+              var row = (slips.data || []).filter(function (item) { return item.id === button.getAttribute("data-print"); })[0];
+              if (row) printPayslip(row, run);
+            };
+          });
+        });
+      });
+    }
+    document.getElementById("pay-form").onsubmit = function (event) {
+      event.preventDefault();
+      var start = document.getElementById("pay-start").value;
+      var end = document.getElementById("pay-end").value;
+      db.rpc("build_payroll", { p_start: start, p_end: end }).then(function (result) {
+        if (result.error) return flash(errText(result.error));
+        flash("Draft built.", true);
+        load(start, end);
+      });
+    };
+    if (gen === viewGen) load(range.start, range.end);
+  }
+
   function render() {
     viewGen += 1;
     var current = route();
@@ -3468,12 +3801,42 @@
     if (current.name === "ops") return renderOps();
     if (current.name === "staff") return renderStaff();
     if (current.name === "modems") return renderModems();
+    if (current.name === "employees") return renderEmployees();
+    if (current.name === "dtr") return renderDtr();
+    if (current.name === "adjustments") return renderAdjustments();
+    if (current.name === "payroll") return renderPayroll();
     if (current.name === "settings") return renderSettings();
     if (current.name === "customers") return renderCustomers();
     return renderDashboard();
   }
 
   var bootedFor = "";
+  var selfEmployee = null;
+  function renderMyPay() {
+    setChrome("guest");
+    if (pageTitle) pageTitle.textContent = "My pay";
+    var person = selfEmployee || {};
+    Promise.all([
+      db.from("attendance_punches").select("work_date, punch_type, punched_at, source").eq("employee_id", person.id).order("work_date", { ascending: false }).limit(40),
+      db.from("attendance_days").select("work_date, half_day, rest_day_work, ot_hours, ot_status").eq("employee_id", person.id).order("work_date", { ascending: false }).limit(40),
+      db.from("payslips").select("net_pay, earnings, late_penalty, days_present, half_days, run_id, payroll_runs(cutoff_start, cutoff_end, status)").eq("employee_id", person.id)
+    ]).then(function (parts) {
+      var punches = parts[0].error ? [] : (parts[0].data || []);
+      var days = parts[1].error ? [] : (parts[1].data || []);
+      var slips = parts[2].error ? [] : (parts[2].data || []);
+      app.innerHTML = "<section class=\"panel\"><h1>" + esc(person.name || "My pay") + "</h1><p class=\"muted\">Your DTR and payslips only.</p></section>" +
+        "<section class=\"panel\"><h2>DTR</h2>" + punches.map(function (row) {
+          return "<p>" + esc(row.work_date) + " · " + esc(row.punch_type) + " · " + esc(manilaTime(row.punched_at)) + "</p>";
+        }).join("") + (punches.length ? "" : "<p>No punches yet.</p>") +
+        days.filter(function (row) { return row.rest_day_work; }).map(function (row) {
+          return "<p class=\"muted\">Rest day work " + esc(row.work_date) + " — for admin review.</p>";
+        }).join("") + "</section>" +
+        "<section class=\"panel\"><h2>Payslips</h2>" + slips.map(function (row) {
+          var run = row.payroll_runs || {};
+          return "<p>" + esc(run.cutoff_start || "") + " to " + esc(run.cutoff_end || "") + " · " + esc(run.status || "") + " · net " + esc(money(row.net_pay)) + "</p>";
+        }).join("") + (slips.length ? "" : "<p>No payslip yet.</p>") + "</section>";
+    });
+  }
   function boot(email) {
     sessionEmail = email || "";
     if (!sessionEmail || bootedFor === sessionEmail.toLowerCase()) return;
@@ -3487,7 +3850,17 @@
         app.innerHTML = "<section class=\"panel\"><h1>Could not open the admin list</h1><p>" + esc(errText(result.error)) + "</p><p class=\"muted\">Run supabase/schema.sql in the Supabase SQL editor, then reload.</p></section>";
         return;
       }
-      if (!result.data) return renderDenied();
+      if (!result.data) {
+        db.from("employees").select("id, name").limit(1).then(function (mine) {
+          if (mine.data && mine.data[0]) {
+            selfEmployee = mine.data[0];
+            renderMyPay();
+            return;
+          }
+          renderDenied();
+        });
+        return;
+      }
       refresh().then(render).catch(function (error) {
         shell("<section class=\"panel\"><h1>Could not load records</h1><p>" + esc(errText(error)) + "</p></section>");
       });
@@ -3496,6 +3869,7 @@
 
   window.addEventListener("hashchange", function () {
     setNavOpen(false);
+    if (selfEmployee) return renderMyPay();
     if (sessionEmail) render();
   });
 
