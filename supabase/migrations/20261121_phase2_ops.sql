@@ -96,6 +96,12 @@ begin
       end if;
     end if;
 
+    if new.stage = 'in_progress' and new.investor_id is null then
+      raise exception 'Assign an investor before marking this customer in progress.';
+    end if;
+    if new.stage = 'inquiry' and old.stage is distinct from 'inquiry' and new.investor_id is not null then
+      raise exception 'Clear the investor before moving this customer back to inquiry.';
+    end if;
     if new.stage = 'encoded' and new.investor_id is null then
       raise exception 'Assign an investor before marking this customer encoded in MikroTik.';
     end if;
@@ -115,8 +121,45 @@ begin
      or new.account_status not in ('Newly Installed', 'Reconnected', 'FREE') then
     new.account_status := public.stage_label(new.stage);
   end if;
-  new.email_address := coalesce(new.email_address, new.email);
-  new.fb_account := coalesce(new.fb_account, new.facebook_name);
+  new.email_address := coalesce(nullif(btrim(new.email_address), ''), nullif(btrim(new.email), ''));
+  new.fb_account := coalesce(nullif(btrim(new.fb_account), ''), nullif(btrim(new.facebook_name), ''));
+  return new;
+end;
+$$;
+
+-- Keep the phase 1 blank-to-null email and Facebook fallback.
+create or replace function public.customers_before_insert()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.role() = 'anon' then
+    new.source := 'website';
+    new.investor_id := null;
+  elsif new.source is null or new.source not in ('website', 'admin') then
+    new.source := 'admin';
+  end if;
+
+  if new.investor_id is not null then
+    new.stage := 'in_progress';
+  else
+    new.stage := 'inquiry';
+  end if;
+
+  new.email_address := coalesce(nullif(btrim(new.email_address), ''), nullif(btrim(new.email), ''));
+  new.fb_account := coalesce(nullif(btrim(new.fb_account), ''), nullif(btrim(new.facebook_name), ''));
+
+  if new.account_number is null or btrim(new.account_number) = '' then
+    new.account_number := public.next_fiberbro_account(new.investor_id);
+  end if;
+
+  if new.due_date_number is null and new.installation_date is not null then
+    new.due_date_number := extract(day from new.installation_date)::integer;
+  end if;
+
+  new.account_status := public.stage_label(new.stage);
   return new;
 end;
 $$;
@@ -196,10 +239,83 @@ alter table public.invoices add constraint invoices_kind_check
 create unique index if not exists invoices_customer_period_kind_uidx
   on public.invoices (customer_id, period, invoice_kind);
 
+-- An installation invoice must not block the monthly bill for the same period.
+create or replace function public.generate_upcoming_bills_job()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_cust record;
+  v_step integer;
+  v_due_on date;
+  v_period_key text;
+  v_label text;
+  v_prev_bal numeric;
+  v_inserted integer := 0;
+  v_fee numeric;
+begin
+  for v_cust in
+    select c.id, c.due_date_number, c.installation_date, c.monthly_bill, c.price
+    from public.customers c
+    where c.stage = 'active'
+  loop
+    for v_step in 0..1 loop
+      v_due_on := public.clamp_due_date(
+        extract(year from (current_date + make_interval(months => v_step)))::integer,
+        extract(month from (current_date + make_interval(months => v_step)))::integer,
+        coalesce(v_cust.due_date_number, extract(day from v_cust.installation_date)::integer, 1)
+      );
+      if current_date < v_due_on - 10 or current_date > v_due_on + 5 then
+        continue;
+      end if;
+      v_period_key := to_char(v_due_on, 'YYYY-MM');
+      v_label := to_char(v_due_on, 'Mon_YYYY');
+      if exists (
+        select 1 from public.invoices i
+        where i.customer_id = v_cust.id
+          and i.period = v_period_key
+          and i.invoice_kind = 'monthly'
+      ) then
+        continue;
+      end if;
+      v_fee := coalesce(v_cust.monthly_bill, v_cust.price, 0);
+      if v_fee <= 0 then
+        continue;
+      end if;
+      select coalesce(sum(greatest(i.amount - coalesce(paid.total, 0), 0)), 0)
+        into v_prev_bal
+      from public.invoices i
+      left join (
+        select p.invoice_id, sum(p.amount) as total
+        from public.payments p
+        where p.status = 'confirmed'
+        group by p.invoice_id
+      ) paid on paid.invoice_id = i.id
+      where i.customer_id = v_cust.id
+        and i.invoice_kind = 'monthly'
+        and i.status in ('unpaid', 'pending')
+        and i.period < v_period_key;
+      insert into public.invoices (
+        customer_id, period, period_label, bill_number, amount, previous_balance,
+        due_date, status, created_by, invoice_kind
+      ) values (
+        v_cust.id, v_period_key, v_label, public.next_bill_number(), v_fee, v_prev_bal,
+        v_due_on, 'unpaid', 'auto', 'monthly'
+      );
+      v_inserted := v_inserted + 1;
+    end loop;
+  end loop;
+  return v_inserted;
+end;
+$$;
+
 -- Expenses keep Gas/Meals/… and also accept Operational and Personal.
 alter table public.expenses add column if not exists account_code text;
 alter table public.expenses add column if not exists scope text;
 alter table public.expenses add column if not exists auto boolean not null default false;
+alter table public.expenses alter column status set default 'approved';
 
 do $$
 declare
@@ -425,6 +541,62 @@ as $$
   select coalesce(nullif(auth.jwt() ->> 'email', ''), 'system');
 $$;
 
+-- One mapper for ticket expenses and later commission reports.
+-- Investor code wins. Otherwise the PPPoE prefix before the first hyphen.
+-- MAL and AL are excluded. A and an exact A prefix map to ALVIN.
+create or replace function public.customer_account_code(p_customer uuid)
+returns text
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_investor_code text;
+  v_pppoe text;
+  v_token text;
+  v_mapped text;
+begin
+  select upper(btrim(i.code)), upper(btrim(c.pppoe))
+    into v_investor_code, v_pppoe
+  from public.customers c
+  left join public.investors i on i.id = c.investor_id
+  where c.id = p_customer;
+
+  v_token := nullif(v_investor_code, '');
+  if v_token is null and v_pppoe is not null then
+    v_token := nullif(split_part(v_pppoe, '-', 1), '');
+  end if;
+  if v_token is null or v_token in ('MAL', 'AL') then
+    return null;
+  end if;
+
+  v_mapped := case v_token
+    when 'A' then 'ALVIN'
+    when 'J' then 'JOLLI'
+    when 'AJ' then 'AINA'
+    when 'AA' then 'AA'
+    when 'NELSONANN' then 'NELSON'
+    when 'HADJ' then 'HADJ'
+    when 'NELSONHADJ' then 'LOKAL'
+    when 'LOKAL' then 'LOKAL'
+    when 'LOKAL(NELSONHADJ)' then 'LOKAL'
+    else v_token
+  end;
+
+  if v_mapped in ('MAL', 'AL') then
+    return null;
+  end if;
+  if v_mapped in (
+    'AA', 'AINA', 'ALVIN', 'ANN', 'CHES', 'FB', 'HADJ', 'JACQ', 'JOLLI',
+    'LOKAL', 'NELSON', 'NOVA', 'NOVAANN', 'NOVAREY', 'OSCAR', 'REY'
+  ) then
+    return v_mapped;
+  end if;
+  return null;
+end;
+$$;
+
 create or replace function public.account_code_for(p_customer uuid)
 returns text
 language sql
@@ -432,15 +604,7 @@ stable
 security definer
 set search_path = public
 as $$
-  select coalesce(
-    nullif(upper(btrim(i.code)), ''),
-    nullif(substring(upper(coalesce(c.account_number, '')) from 'FBRO([A-Z]{2})'), ''),
-    nullif(substring(upper(coalesce(c.account_number, '')) from '^([A-Z]+)'), ''),
-    'XX'
-  )
-  from public.customers c
-  left join public.investors i on i.id = c.investor_id
-  where c.id = p_customer;
+  select public.customer_account_code(p_customer);
 $$;
 
 create or replace function public.ticket_visible_to_caller(p_ticket uuid)
@@ -511,32 +675,32 @@ security definer
 set search_path = public
 as $$
 declare
-  tix public.ops_tickets%rowtype;
-  mat record;
-  price numeric;
-  code text;
-  made integer := 0;
+  v_tix public.ops_tickets%rowtype;
+  v_mat record;
+  v_price numeric;
+  v_code text;
+  v_made integer := 0;
 begin
-  select * into tix from public.ops_tickets where id = p_ticket;
-  if tix.id is null or tix.status is distinct from 'Closed - Resolved' then
+  select * into v_tix from public.ops_tickets where id = p_ticket;
+  if v_tix.id is null or v_tix.status is distinct from 'Closed - Resolved' then
     return 0;
   end if;
-  code := public.account_code_for(tix.customer_id);
-  for mat in
-    select * from public.ticket_materials
-    where ticket_id = tix.id
-      and item in ('SC Connector', 'Changed Modem', 'Rewiring', 'Changed power adaptor')
+  v_code := public.customer_account_code(v_tix.customer_id);
+  for v_mat in
+    select m.* from public.ticket_materials m
+    where m.ticket_id = v_tix.id
+      and m.item in ('SC Connector', 'Changed Modem', 'Rewiring', 'Changed power adaptor')
   loop
-    price := mat.unit_cost;
-    if price is null then
-      select unit_cost into price from public.material_prices where item = mat.item;
+    v_price := v_mat.unit_cost;
+    if v_price is null then
+      select mp.unit_cost into v_price from public.material_prices mp where mp.item = v_mat.item;
     end if;
-    if price is null then
+    if v_price is null then
       continue;
     end if;
     if exists (
-      select 1 from public.expenses
-      where ticket_id = tix.id and scope = mat.item and auto
+      select 1 from public.expenses e
+      where e.ticket_id = v_tix.id and e.scope = v_mat.item and e.auto
     ) then
       continue;
     end if;
@@ -545,19 +709,19 @@ begin
       account_code, scope, ticket_id, auto
     ) values (
       'Operational',
-      round(mat.qty * price, 2),
+      round(v_mat.qty * v_price, 2),
       current_date,
-      'Auto from ' || tix.ticket_no || ' · ' || mat.item,
-      'pending',
+      'Auto from ' || v_tix.ticket_no || ' · ' || v_mat.item,
+      'approved',
       public.ops_actor(),
-      code,
-      mat.item,
-      tix.id,
+      v_code,
+      v_mat.item,
+      v_tix.id,
       true
     );
-    made := made + 1;
+    v_made := v_made + 1;
   end loop;
-  return made;
+  return v_made;
 end;
 $$;
 
@@ -665,17 +829,17 @@ security definer
 set search_path = public
 as $$
 declare
-  made integer;
+  v_made integer;
 begin
   if not public.ticket_visible_to_caller(p_ticket) then
     raise exception 'You cannot close this ticket.';
   end if;
-  update public.ops_tickets
+  update public.ops_tickets t
   set status = 'Closed - Resolved',
-      resolution = coalesce(nullif(btrim(p_resolution), ''), resolution)
-  where id = p_ticket;
-  made := public.post_ticket_expenses(p_ticket);
-  return json_build_object('ok', true, 'expenses', made);
+      resolution = coalesce(nullif(btrim(p_resolution), ''), t.resolution)
+  where t.id = p_ticket;
+  v_made := public.post_ticket_expenses(p_ticket);
+  return json_build_object('ok', true, 'expenses', v_made);
 end;
 $$;
 
@@ -695,44 +859,44 @@ security definer
 set search_path = public
 as $$
 declare
-  tix public.ops_tickets%rowtype;
-  cust public.customers%rowtype;
-  pppoe text;
-  digits text;
-  fee numeric;
-  method text;
-  inv uuid;
-  period text;
+  v_tix public.ops_tickets%rowtype;
+  v_cust public.customers%rowtype;
+  v_pppoe text;
+  v_digits text;
+  v_fee numeric;
+  v_method text;
+  v_inv uuid;
+  v_period text;
 begin
   if not public.ticket_visible_to_caller(p_ticket) then
     raise exception 'You cannot complete this installation.';
   end if;
-  select * into tix from public.ops_tickets where id = p_ticket;
-  if tix.id is null then
+  select * into v_tix from public.ops_tickets where id = p_ticket;
+  if v_tix.id is null then
     raise exception 'Ticket not found.';
   end if;
-  if tix.ticket_type is distinct from 'INSTALLATION' then
+  if v_tix.ticket_type is distinct from 'INSTALLATION' then
     raise exception 'This ticket is not an installation.';
   end if;
-  if tix.customer_id is null then
+  if v_tix.customer_id is null then
     raise exception 'Assign a customer first.';
   end if;
-  if tix.status = 'Closed - Resolved' then
-    return json_build_object('ok', true, 'already', true, 'customer_id', tix.customer_id);
+  if v_tix.status = 'Closed - Resolved' then
+    return json_build_object('ok', true, 'already', true, 'customer_id', v_tix.customer_id);
   end if;
-  select * into cust from public.customers where id = tix.customer_id;
-  if cust.investor_id is null then
+  select * into v_cust from public.customers where id = v_tix.customer_id;
+  if v_cust.investor_id is null then
     raise exception 'Assign an investor before completing the installation.';
   end if;
 
-  if nullif(btrim(cust.pppoe), '') is not null then
-    pppoe := btrim(cust.pppoe);
+  if nullif(btrim(v_cust.pppoe), '') is not null then
+    v_pppoe := btrim(v_cust.pppoe);
   else
-    digits := nullif(right(regexp_replace(coalesce(cust.account_number, ''), '\D', '', 'g'), 6), '');
-    if digits is not null then
-      pppoe := 'fb' || digits;
+    v_digits := nullif(right(regexp_replace(coalesce(v_cust.account_number, ''), '\D', '', 'g'), 6), '');
+    if v_digits is not null then
+      v_pppoe := 'fb' || v_digits;
     else
-      pppoe := 'fb' || substring(encode(extensions.gen_random_bytes(3), 'hex') from 1 for 6);
+      v_pppoe := 'fb' || substring(encode(extensions.gen_random_bytes(3), 'hex') from 1 for 6);
     end if;
   end if;
 
@@ -740,7 +904,7 @@ begin
   update public.customers
   set stage = 'active',
       account_status = 'Newly Installed',
-      pppoe = pppoe,
+      pppoe = v_pppoe,
       lp = coalesce(nullif(btrim(p_lp), ''), lp),
       nap = coalesce(nullif(btrim(p_nap), ''), nap),
       port = coalesce(nullif(btrim(p_port), ''), port),
@@ -748,52 +912,49 @@ begin
       installation_date = coalesce(installation_date, current_date),
       installation_status = 'Done',
       installed_by = public.ops_actor()
-  where id = cust.id;
+  where id = v_cust.id;
 
   if nullif(btrim(p_modem_serial), '') is not null then
-    update public.modems
-    set customer_id = cust.id,
+    update public.modems m
+    set customer_id = v_cust.id,
         availability = 'In Used'
-    where lower(serial) = lower(btrim(p_modem_serial));
+    where lower(m.serial) = lower(btrim(p_modem_serial));
     insert into public.modem_log (modem_id, action, customer_id, note, actor)
-    select id, 'Assigned', cust.id, 'Installation ' || tix.ticket_no, public.ops_actor()
-    from public.modems
-    where lower(serial) = lower(btrim(p_modem_serial));
+    select m.id, 'Assigned', v_cust.id, 'Installation ' || v_tix.ticket_no, public.ops_actor()
+    from public.modems m
+    where lower(m.serial) = lower(btrim(p_modem_serial));
   end if;
 
-  method := lower(btrim(coalesce(p_pay_method, '')));
-  if method = 'gcash' then
-    method := 'gcash';
-  elsif method = 'cash' then
-    method := 'cash';
-  else
-    method := '';
+  v_method := lower(btrim(coalesce(p_pay_method, '')));
+  if v_method not in ('gcash', 'cash') then
+    v_method := '';
   end if;
-  fee := p_pay_amount;
-  if coalesce(fee, 0) <= 0 then
-    select nullif(value, '')::numeric into fee
-    from public.app_settings where key = 'installation_fee';
+  v_fee := p_pay_amount;
+  if coalesce(v_fee, 0) <= 0 then
+    select nullif(s.value, '')::numeric into v_fee
+    from public.app_settings s
+    where s.key = 'installation_fee';
   end if;
-  if method <> '' and coalesce(fee, 0) > 0 then
-    period := to_char(current_date, 'YYYY-MM');
+  if v_method <> '' and coalesce(v_fee, 0) > 0 then
+    v_period := to_char(current_date, 'YYYY-MM');
     insert into public.invoices (customer_id, period, amount, due_date, status, notes, created_by, invoice_kind)
-    values (cust.id, period, fee, current_date, 'unpaid', 'Installation fee', public.ops_actor(), 'installation')
+    values (v_cust.id, v_period, v_fee, current_date, 'unpaid', 'Installation fee', public.ops_actor(), 'installation')
     on conflict (customer_id, period, invoice_kind) do update
       set amount = excluded.amount
-    returning id into inv;
+    returning id into v_inv;
     insert into public.payments (
       invoice_id, customer_id, amount, method, reference_no, status, source, notes
     ) values (
-      inv, cust.id, fee, method, nullif(btrim(p_pay_ref), ''), 'confirmed', 'admin', 'Installation fee'
+      v_inv, v_cust.id, v_fee, v_method, nullif(btrim(p_pay_ref), ''), 'confirmed', 'admin', 'Installation fee'
     );
   end if;
 
   update public.ops_tickets
   set status = 'Closed - Resolved',
       resolution = coalesce(resolution, 'Installed')
-  where id = tix.id;
+  where id = v_tix.id;
 
-  return json_build_object('ok', true, 'customer_id', cust.id, 'pppoe', pppoe, 'amount', fee);
+  return json_build_object('ok', true, 'customer_id', v_cust.id, 'pppoe', v_pppoe, 'amount', v_fee);
 end;
 $$;
 
@@ -1166,6 +1327,7 @@ revoke execute on function
   public.current_staff_id(),
   public.ops_actor(),
   public.account_code_for(uuid),
+  public.customer_account_code(uuid),
   public.ticket_visible_to_caller(uuid),
   public.ops_tickets_before(),
   public.ops_tickets_after(),

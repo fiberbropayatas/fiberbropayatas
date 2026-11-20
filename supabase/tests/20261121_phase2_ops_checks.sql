@@ -25,7 +25,7 @@ select public.clamp_due_date(2026, 2, 31) as feb_2026,
        public.clamp_due_date(2026, 4, 31) as apr_2026;
 
 insert into public.investors (name, code)
-values ('Phase2 Investor', 'AL');
+values ('Phase2 Investor', 'A');
 
 insert into public.customers (name, stage, source, investor_id, monthly_bill, due_date_number)
 select 'Phase2 Check', 'in_progress', 'admin', id, 1000, 31
@@ -59,7 +59,13 @@ select public.resolve_ops_ticket(
   'Line replaced'
 );
 
-select e.category, e.amount, e.account_code, e.scope, e.auto, t.status
+select public.customer_account_code(c.id) as mapped_code
+from public.customers c
+where c.name = 'Phase2 Check'
+order by c.created_at desc
+limit 1;
+
+select e.category, e.amount, e.account_code, e.scope, e.auto, e.status, t.status
 from public.expenses e
 join public.ops_tickets t on t.id = e.ticket_id
 where t.ticket_type = 'REP'
