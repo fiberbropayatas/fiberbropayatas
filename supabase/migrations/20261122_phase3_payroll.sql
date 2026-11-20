@@ -743,6 +743,8 @@ set search_path = public
 as $$
 declare
   v_ot_status text := 'pending';
+  v_old_hours numeric;
+  v_old_status text;
 begin
   if not public.is_payroll() then
     raise exception 'Only payroll or an admin can update the day.';
@@ -750,10 +752,22 @@ begin
   if coalesce(p_approve, false) and not public.is_admin() then
     raise exception 'Only an admin can approve overtime.';
   end if;
-  if coalesce(p_approve, false) then
+  v_old_hours := null;
+  v_old_status := null;
+  select ad.ot_hours, ad.ot_status into v_old_hours, v_old_status
+  from public.attendance_days ad
+  where ad.employee_id = p_employee and ad.work_date = p_date;
+  if public.is_admin() and coalesce(p_approve, false) then
     v_ot_status := 'approved';
+  elsif not public.is_admin() and (
+    v_old_status = 'approved'
+    or v_old_hours is distinct from coalesce(p_ot_hours, 0)
+  ) then
+    v_ot_status := 'pending';
   elsif coalesce(p_ot_hours, 0) = 0 then
     v_ot_status := 'pending';
+  elsif v_old_status is not null then
+    v_ot_status := v_old_status;
   end if;
   insert into public.attendance_days (employee_id, work_date, half_day, half_reason, ot_hours, ot_status)
   values (p_employee, p_date, coalesce(p_half, false), nullif(btrim(p_half_reason), ''), coalesce(p_ot_hours, 0), v_ot_status)
@@ -761,7 +775,7 @@ begin
     set half_day = excluded.half_day,
         half_reason = excluded.half_reason,
         ot_hours = excluded.ot_hours,
-        ot_status = case when p_approve then 'approved' else attendance_days.ot_status end;
+        ot_status = excluded.ot_status;
   insert into public.attendance_audit (employee_id, action, reason, actor, detail)
   values (p_employee, 'day_update', nullif(btrim(p_half_reason), ''), public.payroll_actor(),
     jsonb_build_object('date', p_date, 'half_day', coalesce(p_half, false), 'ot_hours', coalesce(p_ot_hours, 0), 'approved', coalesce(p_approve, false)));

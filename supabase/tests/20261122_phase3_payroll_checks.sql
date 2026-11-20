@@ -52,4 +52,40 @@ from public.payslips ps
 join public.employees e on e.id = ps.employee_id
 where e.name = 'Payroll Check';
 
+-- Admin approves OT, then a payroll admin changes the hours.
+-- The approval must drop back to pending.
+insert into public.staff (email, name, role)
+values ('payroll-phase3@fiberbro.test', 'Payroll Clerk', 'payroll_admin');
+
+select public.save_attendance_day(
+  (select id from public.employees where name = 'Payroll Check'),
+  date '2026-11-02',
+  false,
+  null,
+  2,
+  true
+);
+
+select ad.ot_status as approved_status
+from public.attendance_days ad
+join public.employees e on e.id = ad.employee_id
+where e.name = 'Payroll Check' and ad.work_date = date '2026-11-02';
+
+select set_config('request.jwt.claims', '{"email":"payroll-phase3@fiberbro.test"}', true);
+select set_config('request.jwt.claim.email', 'payroll-phase3@fiberbro.test', true);
+
+select public.save_attendance_day(
+  (select id from public.employees where name = 'Payroll Check'),
+  date '2026-11-02',
+  false,
+  null,
+  3,
+  false
+);
+
+select ad.ot_hours, ad.ot_status as after_payroll_edit
+from public.attendance_days ad
+join public.employees e on e.id = ad.employee_id
+where e.name = 'Payroll Check' and ad.work_date = date '2026-11-02';
+
 rollback;
