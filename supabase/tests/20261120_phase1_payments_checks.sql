@@ -5,7 +5,11 @@
 -- Expected:
 -- 1. After inserting a confirmed payment, the invoice status is paid and
 --    confirmed_at / confirmed_by are filled by the BEFORE stamp trigger.
--- 2. add_gcash_refs parses "2026-11-16 3047334127750 500.00" into one row.
+-- 2. add_gcash_refs parses these lines:
+--      2026-11-16 3047334127750 500.00
+--      2026-11-16 3047 334 127751 250
+--      2026-11-20 1234567890123 1,000.00   -> ref 1234567890123, amount 1000.00
+--      2026-11-20 9876543210987 1,200      -> ref 9876543210987, amount 1200
 --    That call needs an admin JWT. In the SQL editor, set the claim first:
 --    select set_config('request.jwt.claims', '{"email":"fiberbropayatas@gmail.com"}', true);
 
@@ -38,12 +42,12 @@ select set_config('request.jwt.claims', '{"email":"fiberbropayatas@gmail.com"}',
 
 select public.add_gcash_refs(
   (select id from public.gcash_accounts where name = 'Alvin' limit 1),
-  E'2026-11-16 3047334127750 500.00\n2026-11-16 3047 334 127751 250'
+  E'2026-11-16 3047334127750 500.00\n2026-11-16 3047 334 127751 250\n2026-11-20 1234567890123 1,000.00\n2026-11-20 9876543210987 1,200'
 );
 
 select ref_number, txn_date, amount, duplicate_flag
 from public.gcash_refs
-where ref_number in ('3047334127750', '3047334127751')
+where ref_number in ('3047334127750', '3047334127751', '1234567890123', '9876543210987')
 order by ref_number;
 
 rollback;

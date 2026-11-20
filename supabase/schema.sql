@@ -1878,8 +1878,8 @@ begin
     new.stage := 'inquiry';
   end if;
 
-  new.email_address := coalesce(nullif(btrim(new.email_address), ''), new.email);
-  new.fb_account := coalesce(nullif(btrim(new.fb_account), ''), new.facebook_name);
+  new.email_address := coalesce(nullif(btrim(new.email_address), ''), nullif(btrim(new.email), ''));
+  new.fb_account := coalesce(nullif(btrim(new.fb_account), ''), nullif(btrim(new.facebook_name), ''));
 
   if new.account_number is null or btrim(new.account_number) = '' then
     new.account_number := public.next_fiberbro_account(new.investor_id);
@@ -2438,11 +2438,12 @@ begin
     end if;
     cleaned := regexp_replace(raw_line, '\d{4}-\d{2}-\d{2}', ' ', 'g');
     cleaned := regexp_replace(cleaned, '[A-Za-z]{3}\s+\d{1,2},\s+\d{4}', ' ', 'g');
-    amt := substring(replace(cleaned, ',', '') from '(\d+\.\d{2})\s*$')::numeric;
+    cleaned := replace(cleaned, ',', '');
+    amt := substring(cleaned from '(\d+\.\d{2})\s*$')::numeric;
     if amt is not null then
       cleaned := regexp_replace(cleaned, '\d+\.\d{2}\s*$', ' ');
     else
-      amt := substring(replace(cleaned, ',', '') from '(\d+)\s*$')::numeric;
+      amt := substring(cleaned from '(\d+)\s*$')::numeric;
       if amt is not null then
         cleaned := regexp_replace(cleaned, '\d+\s*$', ' ');
       end if;
@@ -2698,3 +2699,24 @@ begin
 exception when others then
   null;
 end $$;
+
+-- Supabase grants execute on new public functions to anon and authenticated.
+-- revoke from public does not remove those direct grants.
+revoke execute on function public.generate_upcoming_bills_job(), public.auto_match_logbook(uuid),
+  public.apply_invoice_payment_state(uuid), public.next_bill_number(), public.next_fiberbro_account(uuid)
+  from public, anon, authenticated;
+revoke execute on function public.generate_upcoming_bills(), public.add_gcash_refs(uuid, text),
+  public.manual_process_logbook(uuid) from public, anon;
+revoke execute on function
+  public.customers_before_insert(),
+  public.customers_fill_due_day(),
+  public.stamp_payment_confirmation(),
+  public.sync_invoice_from_payment(),
+  public.trg_auto_match_logbook(),
+  public.trg_auto_match_gcash_ref(),
+  public.virtual_logbook_fill(),
+  public.trg_logbook_from_proof(),
+  public.normalize_gcash_ref(text),
+  public.collection_cutoff(date),
+  public.clamp_due_date(integer, integer, integer)
+  from public, anon, authenticated;
