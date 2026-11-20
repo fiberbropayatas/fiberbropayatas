@@ -141,6 +141,9 @@
         move: moves[Math.floor(Math.random() * moves.length)],
         started: Date.now(),
         baseline: null,
+        calibStart: 0,
+        calibFrames: 0,
+        baselineLocked: false,
         blinkClosed: false,
         blinkDone: false,
         nodDown: false,
@@ -193,9 +196,18 @@
           state.lastSeen = Date.now();
           var face = faces[0];
           var pose = metrics(face.landmarks);
-          if (!state.baseline) {
-            state.baseline = pose;
-            keepFrame();
+          if (!state.baselineLocked) {
+            if (!state.calibStart) {
+              state.calibStart = Date.now();
+              keepFrame();
+            }
+            state.calibFrames += 1;
+            if (!state.baseline || pose.ear > state.baseline.ear) state.baseline = pose;
+            if (state.calibFrames < 3 && Date.now() - state.calibStart < 400) {
+              setTimeout(step, TICK_MS);
+              return;
+            }
+            state.baselineLocked = true;
           }
           if (face.descriptor) {
             var match = bestMatch(api, face.descriptor, roster);

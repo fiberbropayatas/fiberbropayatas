@@ -571,7 +571,7 @@
     setChrome("guest");
     if (who) who.innerHTML = "";
     if (pageTitle) pageTitle.textContent = "Sign in";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261124a\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261124a\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261124b\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261124b\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -3656,10 +3656,15 @@
                 if (photo.error) return flash(errText(photo.error));
                 var rows = photo.data || [];
                 if (!rows.length) return flash("No selfie stored.");
-                document.getElementById("photo-strip").innerHTML = rows.map(function (item) {
-                  var src = "data:" + (item.content_type || "image/jpeg") + ";base64," + item.image_base64;
-                  return "<img alt=\"Punch photo\" src=\"" + src + "\" width=\"96\" height=\"96\" style=\"object-fit:cover;margin:0.25rem;border-radius:8px\">";
+                var html = rows.map(function (item) {
+                  var ct = /^image\/(jpeg|png|webp)$/.test(item.content_type || "") ? item.content_type : "image/jpeg";
+                  var b64 = item.image_base64 || "";
+                  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return "";
+                  var src = "data:" + ct + ";base64," + b64;
+                  return "<img alt=\"Punch photo\" src=\"" + esc(src) + "\" width=\"96\" height=\"96\" style=\"object-fit:cover;margin:0.25rem;border-radius:8px\">";
                 }).join("");
+                if (!html) return flash("No selfie stored.");
+                document.getElementById("photo-strip").innerHTML = html;
               });
             };
           });

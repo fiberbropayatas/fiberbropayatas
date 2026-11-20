@@ -5981,6 +5981,15 @@ begin
   if length(p_selfie) > v_max_len then
     raise exception 'A photo is too large.';
   end if;
+  if p_selfie !~ '^[A-Za-z0-9+/]+={0,2}$' then
+    raise exception 'A photo is not a valid JPEG';
+  end if;
+  if p_liveness is not null and (
+    jsonb_typeof(p_liveness) is distinct from 'object'
+    or length(p_liveness::text) > 1000
+  ) then
+    raise exception 'Liveness data is not valid.';
+  end if;
   if p_liveness is not null and coalesce(p_liveness ->> 'passed', '') is distinct from 'true' then
     raise exception 'Liveness check did not pass.';
   end if;
@@ -6028,6 +6037,9 @@ begin
       if length(v_shot) > v_max_len then
         raise exception 'A photo is too large.';
       end if;
+      if v_shot !~ '^[A-Za-z0-9+/]+={0,2}$' then
+        raise exception 'A photo is not a valid JPEG';
+      end if;
       insert into public.attendance_photos (punch_id, content_type, image_base64)
       values (v_punch, 'image/jpeg', v_shot);
       v_saved := v_saved + 1;
@@ -6039,3 +6051,52 @@ $$;
 
 revoke all on function public.kiosk_punch(text, uuid, text, text, text[], jsonb) from public, anon, authenticated;
 grant execute on function public.kiosk_punch(text, uuid, text, text, text[], jsonb) to anon, authenticated;
+
+create or replace function public.manual_attendance(
+  p_employee uuid,
+  p_date date,
+  p_type text,
+  p_at timestamptz,
+  p_reason text,
+  p_selfie text
+)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_punch uuid;
+begin
+  if not public.is_payroll() then
+    raise exception 'Only payroll or an admin can encode attendance by hand.';
+  end if;
+  if nullif(btrim(p_reason), '') is null then
+    raise exception 'A reason is required for a manual entry.';
+  end if;
+  if p_type not in ('clock_in', 'lunch_out', 'lunch_in', 'clock_out') then
+    raise exception 'Unknown punch.';
+  end if;
+  if nullif(btrim(p_selfie), '') is not null and p_selfie !~ '^[A-Za-z0-9+/]+={0,2}$' then
+    raise exception 'A photo is not a valid JPEG';
+  end if;
+  insert into public.attendance_punches (employee_id, work_date, punch_type, punched_at, source, reason, entered_by)
+  values (p_employee, p_date, p_type, coalesce(p_at, now()), 'manual', btrim(p_reason), public.payroll_actor())
+  on conflict (employee_id, work_date, punch_type) do update
+    set punched_at = excluded.punched_at,
+        source = 'manual',
+        reason = excluded.reason,
+        entered_by = excluded.entered_by
+  returning id into v_punch;
+  if nullif(btrim(p_selfie), '') is not null then
+    insert into public.attendance_photos (punch_id, content_type, image_base64)
+    values (v_punch, 'image/jpeg', p_selfie);
+  end if;
+  insert into public.attendance_audit (employee_id, punch_id, action, reason, actor)
+  values (p_employee, v_punch, 'manual_' || p_type, btrim(p_reason), public.payroll_actor());
+  return json_build_object('ok', true, 'punch_id', v_punch);
+end;
+$$;
+
+revoke all on function public.manual_attendance(uuid, date, text, timestamptz, text, text) from public, anon;
+grant execute on function public.manual_attendance(uuid, date, text, timestamptz, text, text) to authenticated;
