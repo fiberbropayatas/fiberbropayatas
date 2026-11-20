@@ -11,7 +11,7 @@
   var SECTIONS = [
     { title: "Account", fields: [
       ["account_number", "Account Number", "text"],
-      ["account_status", "Account Status", "text"],
+      ["account_status", "Account Status", "account_status"],
       ["name", "Name", "text"],
       ["first_name", "First name", "text"],
       ["last_name", "Last name", "text"],
@@ -44,7 +44,12 @@
       ["installation_status", "Installation Status", "text"],
       ["installation_date", "Installation date", "date"],
       ["preferred_install_date", "Preferred install date", "date"],
-      ["installation_remarks", "Installation remarks", "textarea"]
+      ["installation_remarks", "Installation remarks", "textarea"],
+      ["service_location", "Location", "location"],
+      ["referral_source", "Referral source", "text"],
+      ["referral_type", "Referral type", "text"],
+      ["referral_name", "Referral name", "text"],
+      ["privacy_consent", "Data privacy consent", "bool"]
     ]},
     { title: "Plan", fields: [
       ["plan", "Plan", "text"],
@@ -84,6 +89,7 @@
       ["payment_mode", "Payment Mode", "text"]
     ]},
     { title: "Modem", fields: [
+      ["modem_serial", "Modem serial", "text"],
       ["modem_brand", "Modem Brand", "text"],
       ["modem_type", "Modem Type", "text"],
       ["mac_address", "Mac address", "text"],
@@ -383,6 +389,11 @@
       ["gcash", "GCash refs", "payments"],
       ["logbook", "Logbook", "tickets"]
     ]],
+    ["Operations", [
+      ["ops", "Tickets", "tickets"],
+      ["staff", "Staff", "technicians"],
+      ["modems", "Modems", "repairs"]
+    ]],
     ["Network", [
       ["map", "Map", "map"],
       ["investors", "Investors", "investors"],
@@ -407,6 +418,9 @@
     investors: "Investors",
     technicians: "Technicians",
     tickets: "Install tickets",
+    ops: "Tickets",
+    staff: "Staff",
+    modems: "Modems",
     settings: "Settings",
     admins: "Admins"
   };
@@ -543,7 +557,7 @@
     setChrome("guest");
     if (who) who.innerHTML = "";
     if (pageTitle) pageTitle.textContent = "Sign in";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261120d\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261120d\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261121a\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261121a\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -628,6 +642,21 @@
     var id = "f-" + key;
     if (key === "account_number" && !customer.id) {
       return "<div class=\"field\"><label for=\"" + id + "\">Account Number</label><input id=\"" + id + "\" data-key=\"account_number\" data-type=\"text\" type=\"text\" placeholder=\"Auto (next number)\" value=\"\"></div>";
+    }
+    if (type === "account_status") {
+      var statuses = ["Inquiry", "In Progress", "Encoded", "Active", "Newly Installed", "Reconnected", "FREE"];
+      if (value && statuses.indexOf(value) < 0) statuses.push(value);
+      return "<div class=\"field\"><label for=\"" + id + "\">" + esc(label) + "</label><select id=\"" + id + "\" data-key=\"" + key + "\" data-type=\"text\">" +
+        statuses.map(function (item) {
+          return "<option" + (item === value ? " selected" : "") + ">" + esc(item) + "</option>";
+        }).join("") + "</select><span class=\"muted\">Newly Installed, Reconnected, and FREE stay when you save. Other labels follow the stage.</span></div>";
+    }
+    if (type === "location") {
+      var places = ["", "Payatas", "Maligaya", "Pampanga"];
+      return "<div class=\"field\"><label for=\"" + id + "\">" + esc(label) + "</label><select id=\"" + id + "\" data-key=\"" + key + "\" data-type=\"text\">" +
+        places.map(function (item) {
+          return "<option value=\"" + esc(item) + "\"" + (item === (value || "") ? " selected" : "") + ">" + esc(item || "Not set") + "</option>";
+        }).join("") + "</select></div>";
     }
     if (type === "bool") {
       return "<div class=\"field check\"><input id=\"" + id + "\" data-key=\"" + key + "\" data-type=\"bool\" type=\"checkbox\"" + (value ? " checked" : "") + "><label for=\"" + id + "\">" + esc(label) + "</label></div>";
@@ -1777,7 +1806,7 @@
       expenses.forEach(function (row) { rememberYear(row.expense_date); });
       if (years.indexOf(monthNow.slice(0, 4)) === -1) years.push(monthNow.slice(0, 4));
       years.sort();
-      var categories = ["Gas", "Meals", "Materials", "Maintenance", "Office Supplies", "Transportation", "Repairs", "Others"];
+      var categories = ["Gas", "Meals", "Materials", "Maintenance", "Office Supplies", "Transportation", "Repairs", "Others", "Operational", "Personal"];
       function paint(month, year, category, status) {
         var period = year && month ? year + "-" + month : "";
         var sales = invoices.filter(function (row) {
@@ -1806,7 +1835,7 @@
         }).join("");
         var body = shown.map(function (row) {
           return "<tr><td data-label=\"Date\">" + esc(row.expense_date || "") + "</td>" +
-            "<td data-label=\"Category\">" + esc(row.category) + "</td>" +
+            "<td data-label=\"Category\">" + esc(row.category) + (row.account_code ? " · " + esc(row.account_code) : "") + (row.auto ? " · auto" : "") + "</td>" +
             "<td data-label=\"Amount\">" + esc(money(row.amount)) + "</td>" +
             "<td data-label=\"Remarks\">" + esc(row.remarks || "") + "</td>" +
             "<td data-label=\"Status\">" + statusPill(row.status) + "</td>" +
@@ -2541,9 +2570,14 @@
   function renderSettings() {
     var gen = viewGen;
     shell("<section class=\"panel\"><h1>Settings</h1><p class=\"muted\">Loading…</p></section>");
-    db.from("app_settings").select("*").order("key").then(function (result) {
+    Promise.all([
+      db.from("app_settings").select("*").order("key"),
+      db.from("material_prices").select("*").order("item")
+    ]).then(function (parts) {
+      var result = parts[0];
       if (result.error) return flash(errText(result.error));
       if (gen !== viewGen) return;
+      var prices = parts[1].error ? [] : (parts[1].data || []);
       var fields = [
         ["gcash_number", "GCash number"],
         ["gcash_name", "GCash name"],
@@ -2551,22 +2585,30 @@
         ["payment_note", "Payment note"],
         ["grace_days", "Grace period (days)"],
         ["installation_fee", "Installation fee (₱)"],
-        ["account_number_format", "Account number format"]
+        ["account_number_format", "Account number format"],
+        ["ticket_issues", "Ticket issues (one per line)"]
       ];
       var values = {};
       (result.data || []).forEach(function (row) { values[row.key] = row.value || ""; });
       shell("<section class=\"panel\"><h1>Settings</h1><form id=\"settings-form\" class=\"grid\">" +
         fields.map(function (field) {
-          var input = field[0] === "payment_note"
+          var input = field[0] === "payment_note" || field[0] === "ticket_issues"
             ? "<textarea id=\"set-" + field[0] + "\">" + esc(values[field[0]] || "") + "</textarea>"
             : "<input id=\"set-" + field[0] + "\" value=\"" + esc(values[field[0]] || "") + "\">";
           return "<div class=\"field\"><label for=\"set-" + field[0] + "\">" + esc(field[1]) + "</label>" + input + "</div>";
         }).join("") +
-        "<button class=\"btn\" type=\"submit\">Save settings</button></form></section>");
+        "<button class=\"btn\" type=\"submit\">Save settings</button></form>" +
+        (parts[1].error ? "<p class=\"muted\">Material prices appear after supabase/migrations/20261121_phase2_ops.sql is applied.</p>" :
+          "<h2>Material prices</h2><p class=\"muted\">SC connector starts at ₱28. Leave the others blank until you set a price. Blank prices are not posted as expenses.</p><form id=\"price-form\" class=\"grid two\">" +
+          prices.map(function (row) {
+            return "<div class=\"field\"><label for=\"price-" + esc(row.item) + "\">" + esc(row.item) + "</label><input id=\"price-" + esc(row.item) + "\" data-item=\"" + esc(row.item) + "\" type=\"number\" min=\"0\" step=\"0.01\" value=\"" + esc(row.unit_cost == null ? "" : row.unit_cost) + "\"></div>";
+          }).join("") +
+          "<button class=\"btn\" type=\"submit\">Save prices</button></form>") +
+        "</section>");
       document.getElementById("settings-form").onsubmit = function (event) {
         event.preventDefault();
         var writes = fields.map(function (field) {
-          var privateSetting = field[0] === "grace_days" || field[0] === "installation_fee" || field[0] === "account_number_format";
+          var privateSetting = field[0] === "grace_days" || field[0] === "installation_fee" || field[0] === "account_number_format" || field[0] === "ticket_issues";
           return db.from("app_settings").upsert({
             key: field[0],
             value: document.getElementById("set-" + field[0]).value,
@@ -2578,6 +2620,23 @@
           var failed = saved.filter(function (item) { return item.error; })[0];
           if (failed) return flash(errText(failed.error));
           flash("Settings saved.", true);
+        });
+      };
+      var priceForm = document.getElementById("price-form");
+      if (priceForm) priceForm.onsubmit = function (event) {
+        event.preventDefault();
+        var writes = Array.prototype.map.call(priceForm.querySelectorAll("[data-item]"), function (input) {
+          var raw = input.value.trim();
+          return db.from("material_prices").upsert({
+            item: input.getAttribute("data-item"),
+            unit_cost: raw === "" ? null : Number(raw),
+            updated_at: new Date().toISOString()
+          });
+        });
+        Promise.all(writes).then(function (saved) {
+          var failed = saved.filter(function (item) { return item.error; })[0];
+          if (failed) return flash(errText(failed.error));
+          flash("Prices saved.", true);
         });
       };
     });
@@ -3017,6 +3076,373 @@
     }).catch(function (error) { flash(errText(error)); });
   }
 
+  var OPS_TYPES = [
+    ["REP", "Repair"],
+    ["INSTALLATION", "Installation"],
+    ["PUL", "Pullout"],
+    ["CHP", "Change plan"],
+    ["MOD", "Change modem"],
+    ["REL", "Relocation"],
+    ["REW", "Rewiring"]
+  ];
+  var OPS_STATUSES = ["Open", "Assigned", "In Progress", "Closed - Resolved"];
+  var MATERIAL_ITEMS = ["SC Connector", "Changed Modem", "Rewiring", "Changed power adaptor", "other"];
+
+  function opsTypeLabel(code) {
+    var found = OPS_TYPES.filter(function (item) { return item[0] === code; })[0];
+    return found ? found[1] : code;
+  }
+
+  function uploadTicketPhoto(ticketId, file) {
+    var safe = String(file.name || "photo.jpg").replace(/[^\w.]+/g, "-");
+    var path = "tickets/" + ticketId + "/" + Date.now() + "-" + safe;
+    return db.storage.from("ticket-photos").upload(path, file, { contentType: file.type || "image/jpeg", upsert: false }).then(function (result) {
+      if (result.error) throw result.error;
+      return db.from("ticket_photos").insert({ ticket_id: ticketId, path: path, created_by: sessionEmail });
+    });
+  }
+
+  function renderStaff() {
+    var gen = viewGen;
+    shell("<section class=\"panel\"><h1>Staff</h1><p class=\"muted\">Loading…</p></section>");
+    db.from("staff").select("*").order("name").then(function (result) {
+      if (gen !== viewGen) return;
+      if (result.error) return flash("Staff is not ready. Apply supabase/migrations/20261121_phase2_ops.sql. " + errText(result.error));
+      var rows = result.data || [];
+      var body = rows.map(function (row) {
+        return "<tr><td data-label=\"Name\">" + esc(row.name) + "</td><td data-label=\"Email\">" + esc(row.email) + "</td><td data-label=\"Role\">" + esc(row.role) + "</td><td data-label=\"Duty\">" + esc(row.duty_status) + "</td><td data-label=\"Active\">" + (row.active ? "Yes" : "No") + "</td>" +
+          "<td><button type=\"button\" class=\"btn secondary\" data-staff=\"" + row.id + "\">" + (row.active ? "Deactivate" : "Activate") + "</button></td></tr>";
+      }).join("");
+      shell("<section class=\"panel\"><h1>Staff</h1><p class=\"muted\">Tech accounts sign in with Google at <a href=\"/tech/\">/tech/</a> and only see tickets assigned to them. Admin access still comes from the Admins allowlist.</p>" +
+        "<form id=\"staff-form\" class=\"grid two\">" +
+        "<div class=\"field\"><label>Name</label><input id=\"staff-name\" required></div>" +
+        "<div class=\"field\"><label>Gmail</label><input id=\"staff-email\" type=\"email\" required></div>" +
+        "<div class=\"field\"><label>Role</label><select id=\"staff-role\"><option value=\"tech\">tech</option><option value=\"admin\">admin</option><option value=\"payroll_admin\">payroll_admin</option><option value=\"investor\">investor</option></select></div>" +
+        "<button class=\"btn\" type=\"submit\">Add staff</button></form></section>" +
+        "<div class=\"table-wrap\"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Duty</th><th>Active</th><th></th></tr></thead><tbody>" +
+        (body || "<tr><td colspan=\"6\">No staff yet.</td></tr>") + "</tbody></table></div>");
+      document.getElementById("staff-form").onsubmit = function (event) {
+        event.preventDefault();
+        db.from("staff").insert({
+          name: document.getElementById("staff-name").value.trim(),
+          email: document.getElementById("staff-email").value.trim(),
+          role: document.getElementById("staff-role").value
+        }).then(function (insert) {
+          if (insert.error) return flash(errText(insert.error));
+          flash("Staff saved.", true);
+          renderStaff();
+        });
+      };
+      app.querySelectorAll("[data-staff]").forEach(function (button) {
+        button.onclick = function () {
+          var row = rows.filter(function (item) { return item.id === button.getAttribute("data-staff"); })[0];
+          db.from("staff").update({ active: !row.active }).eq("id", row.id).then(function (update) {
+            if (update.error) return flash(errText(update.error));
+            renderStaff();
+          });
+        };
+      });
+    });
+  }
+
+  function renderModems() {
+    var gen = viewGen;
+    shell("<section class=\"panel\"><h1>Modems</h1><p class=\"muted\">Loading…</p></section>");
+    Promise.all([
+      db.from("modems").select("*, customers(name, account_number)").order("serial"),
+      db.from("modem_log").select("*").order("created_at", { ascending: false }).limit(30),
+      db.from("customers").select("id, name, account_number").order("name")
+    ]).then(function (parts) {
+      if (gen !== viewGen) return;
+      if (parts[0].error) return flash("Modems are not ready. Apply supabase/migrations/20261121_phase2_ops.sql. " + errText(parts[0].error));
+      var rows = parts[0].data || [];
+      var log = parts[1].error ? [] : (parts[1].data || []);
+      var people = parts[2].error ? [] : (parts[2].data || []);
+      var body = rows.map(function (row) {
+        var person = row.customers || {};
+        return "<tr><td data-label=\"Serial\">" + esc(row.serial) + "</td><td data-label=\"Brand\">" + esc(row.brand) + "</td><td data-label=\"Type\">" + esc(row.modem_type) + "</td><td data-label=\"Condition\">" + esc(row.condition) + "</td><td data-label=\"Availability\">" + esc(row.availability) + "</td><td data-label=\"Customer\">" + esc(person.name || person.account_number || "—") + "</td></tr>";
+      }).join("");
+      var logBody = log.map(function (row) {
+        return "<tr><td>" + esc(String(row.created_at || "").slice(0, 16).replace("T", " ")) + "</td><td>" + esc(row.action) + "</td><td>" + esc(row.note || "") + "</td><td>" + esc(row.actor || "") + "</td></tr>";
+      }).join("");
+      shell("<section class=\"panel\"><h1>Modems</h1><form id=\"modem-form\" class=\"grid two\">" +
+        "<div class=\"field\"><label>Serial</label><input id=\"modem-serial\" required></div>" +
+        "<div class=\"field\"><label>MAC</label><input id=\"modem-mac\"></div>" +
+        "<div class=\"field\"><label>Brand</label><select id=\"modem-brand\"><option>IOT</option><option>SKYWORTH</option><option>HUAWEI</option><option>ZTE</option><option>FIBER HOME</option></select></div>" +
+        "<div class=\"field\"><label>Type</label><select id=\"modem-type\"><option>GPON</option><option>GPON 5V5</option><option>GPON 1V5</option><option>XPON</option><option>EPON</option></select></div>" +
+        "<div class=\"field\"><label>Condition</label><select id=\"modem-condition\"><option>100% Working</option><option>Faulty</option></select></div>" +
+        "<button class=\"btn\" type=\"submit\">Add modem</button></form></section>" +
+        "<div class=\"table-wrap\"><table><thead><tr><th>Serial</th><th>Brand</th><th>Type</th><th>Condition</th><th>Availability</th><th>Customer</th></tr></thead><tbody>" +
+        (body || "<tr><td colspan=\"6\">No modems yet.</td></tr>") + "</tbody></table></div>" +
+        "<section class=\"panel\"><h2>Pullout</h2><form id=\"pull-form\" class=\"grid two\">" +
+        "<div class=\"field\"><label>Modem</label><select id=\"pull-modem\" required><option value=\"\">Select</option>" + rows.map(function (row) {
+          return "<option value=\"" + row.id + "\">" + esc(row.serial) + "</option>";
+        }).join("") + "</select></div>" +
+        "<div class=\"field\"><label>Customer</label><select id=\"pull-customer\"><option value=\"\">None</option>" + people.map(function (person) {
+          return "<option value=\"" + person.id + "\">" + esc(person.name || person.account_number || "Customer") + "</option>";
+        }).join("") + "</select></div>" +
+        "<div class=\"field\"><label>Type</label><select id=\"pull-type\"><option>Disconnection</option><option>Changed Modem</option></select></div>" +
+        "<div class=\"field\"><label>Return fee</label><select id=\"pull-fee\"><option>0</option><option>290</option><option>300</option></select></div>" +
+        "<div class=\"field\"><label>Date</label><input id=\"pull-date\" type=\"date\"></div>" +
+        "<button class=\"btn\" type=\"submit\">Record pullout</button></form></section>" +
+        "<section class=\"panel\"><h2>In / out log</h2><div class=\"table-wrap\"><table><thead><tr><th>When</th><th>Action</th><th>Note</th><th>By</th></tr></thead><tbody>" +
+        (logBody || "<tr><td colspan=\"4\">No log yet.</td></tr>") + "</tbody></table></div></section>");
+      document.getElementById("modem-form").onsubmit = function (event) {
+        event.preventDefault();
+        db.from("modems").insert({
+          serial: document.getElementById("modem-serial").value.trim(),
+          mac: document.getElementById("modem-mac").value.trim() || null,
+          brand: document.getElementById("modem-brand").value,
+          modem_type: document.getElementById("modem-type").value,
+          condition: document.getElementById("modem-condition").value
+        }).then(function (insert) {
+          if (insert.error) return flash(errText(insert.error));
+          flash("Modem added.", true);
+          renderModems();
+        });
+      };
+      document.getElementById("pull-form").onsubmit = function (event) {
+        event.preventDefault();
+        db.rpc("modem_pullout", {
+          p_modem: document.getElementById("pull-modem").value,
+          p_customer: document.getElementById("pull-customer").value || null,
+          p_type: document.getElementById("pull-type").value,
+          p_fee: Number(document.getElementById("pull-fee").value),
+          p_date: document.getElementById("pull-date").value || null
+        }).then(function (result) {
+          if (result.error) return flash(errText(result.error));
+          flash("Pullout recorded. Modem is Available again.", true);
+          renderModems();
+        });
+      };
+    });
+  }
+
+  function renderOps() {
+    if (route().id) return renderOpsTicket(route().id);
+    var gen = viewGen;
+    shell("<section class=\"panel\"><h1>Tickets</h1><p class=\"muted\">Loading…</p></section>");
+    Promise.all([
+      db.from("ops_tickets").select("*, customers(name, account_number)").order("created_at", { ascending: false }),
+      db.from("staff").select("id, name, role, active").eq("active", true).order("name"),
+      db.from("app_settings").select("value").eq("key", "ticket_issues").maybeSingle(),
+      db.from("investors").select("id, name, code, active").eq("active", true).order("name")
+    ]).then(function (parts) {
+      if (gen !== viewGen) return;
+      if (parts[0].error) return flash("Tickets are not ready. Apply supabase/migrations/20261121_phase2_ops.sql. " + errText(parts[0].error));
+      var rows = parts[0].data || [];
+      var staff = parts[1].error ? [] : (parts[1].data || []);
+      var issues = String((parts[2].data && parts[2].data.value) || "No internet\nOthers").split(/\r?\n/).map(function (item) { return item.trim(); }).filter(Boolean);
+      var investors = parts[3].error ? state.investors : (parts[3].data || []);
+      var techs = staff.filter(function (row) { return row.role === "tech"; });
+      var body = rows.map(function (row) {
+        var person = row.customers || {};
+        var tech = staff.filter(function (item) { return item.id === row.assigned_to; })[0] || {};
+        return "<tr><td data-label=\"Ticket\"><a href=\"#ops/" + row.id + "\">" + esc(row.ticket_no) + "</a></td><td data-label=\"Type\">" + esc(opsTypeLabel(row.ticket_type)) + "</td><td data-label=\"Customer\">" + esc(person.name || "—") + "</td><td data-label=\"Issue\">" + esc(row.issue || "") + "</td><td data-label=\"Status\">" + esc(row.status) + "</td><td data-label=\"Tech\">" + esc(tech.name || "—") + "</td></tr>";
+      }).join("");
+      shell("<section class=\"panel\"><h1>Tickets</h1><p class=\"muted\">Repair, installation, pullout, change plan, change modem, relocation, and rewiring. The old Install tickets list is unchanged.</p>" +
+        "<form id=\"ops-form\" class=\"grid two\">" +
+        "<div class=\"field\"><label>Type</label><select id=\"ops-type\">" + OPS_TYPES.map(function (item) { return "<option value=\"" + item[0] + "\">" + esc(item[1]) + "</option>"; }).join("") + "</select></div>" +
+        "<div class=\"field\"><label>Customer</label><select id=\"ops-customer\"><option value=\"\">None yet</option>" + customerChoices() + "</select></div>" +
+        "<div class=\"field\"><label>Issue</label><select id=\"ops-issue\">" + issues.map(function (item) { return "<option>" + esc(item) + "</option>"; }).join("") + "</select></div>" +
+        "<div class=\"field\"><label>Tech</label><select id=\"ops-tech\"><option value=\"\">Unassigned</option>" + techs.map(function (row) { return "<option value=\"" + row.id + "\">" + esc(row.name) + "</option>"; }).join("") + "</select></div>" +
+        "<button class=\"btn\" type=\"submit\">Open ticket</button></form></section>" +
+        "<section class=\"panel\"><h2>Bagong client</h2><p class=\"muted\">Creates the customer and an installation ticket. Data privacy consent is required.</p>" +
+        "<form id=\"intake-form\" class=\"grid two\">" +
+        "<div class=\"field\"><label>Name</label><input id=\"in-name\" required></div>" +
+        "<div class=\"field\"><label>Mobile</label><input id=\"in-mobile\"></div>" +
+        "<div class=\"field\"><label>Location</label><select id=\"in-location\"><option value=\"\">Select</option><option>Payatas</option><option>Maligaya</option><option>Pampanga</option></select></div>" +
+        "<div class=\"field\"><label>Investor</label><select id=\"in-investor\"><option value=\"\">None yet</option>" + investors.map(function (row) { return "<option value=\"" + row.id + "\">" + esc((row.code ? row.code + " · " : "") + row.name) + "</option>"; }).join("") + "</select></div>" +
+        "<div class=\"field\"><label>Referral source</label><input id=\"in-source\"></div>" +
+        "<div class=\"field\"><label>Referral type</label><input id=\"in-rtype\"></div>" +
+        "<div class=\"field\"><label>Referral name</label><input id=\"in-rname\"></div>" +
+        "<div class=\"field\"><label>Plan</label><input id=\"in-plan\"></div>" +
+        "<div class=\"field\"><label>Address</label><input id=\"in-address\"></div>" +
+        "<div class=\"field check\"><input id=\"in-consent\" type=\"checkbox\"><label for=\"in-consent\">Customer agreed to the data privacy notice</label></div>" +
+        "<button class=\"btn\" type=\"submit\">Save client and open installation</button></form></section>" +
+        "<div class=\"table-wrap\"><table><thead><tr><th>Ticket</th><th>Type</th><th>Customer</th><th>Issue</th><th>Status</th><th>Tech</th></tr></thead><tbody>" +
+        (body || "<tr><td colspan=\"6\">No tickets yet.</td></tr>") + "</tbody></table></div>");
+      document.getElementById("ops-form").onsubmit = function (event) {
+        event.preventDefault();
+        var tech = document.getElementById("ops-tech").value;
+        db.from("ops_tickets").insert({
+          ticket_type: document.getElementById("ops-type").value,
+          customer_id: document.getElementById("ops-customer").value || null,
+          issue: document.getElementById("ops-issue").value,
+          assigned_to: tech || null,
+          status: tech ? "Assigned" : "Open"
+        }).then(function (insert) {
+          if (insert.error) return flash(errText(insert.error));
+          flash("Ticket opened.", true);
+          renderOps();
+        });
+      };
+      document.getElementById("intake-form").onsubmit = function (event) {
+        event.preventDefault();
+        db.rpc("intake_new_client", {
+          p_name: document.getElementById("in-name").value.trim(),
+          p_mobile: document.getElementById("in-mobile").value.trim(),
+          p_location: document.getElementById("in-location").value,
+          p_referral_source: document.getElementById("in-source").value.trim(),
+          p_referral_type: document.getElementById("in-rtype").value.trim(),
+          p_referral_name: document.getElementById("in-rname").value.trim(),
+          p_consent: document.getElementById("in-consent").checked,
+          p_investor: document.getElementById("in-investor").value || null,
+          p_plan: document.getElementById("in-plan").value.trim(),
+          p_address: document.getElementById("in-address").value.trim()
+        }).then(function (result) {
+          if (result.error) return flash(errText(result.error));
+          var ticket = result.data && result.data.ticket_id;
+          flash("Client saved.", true);
+          if (ticket) go("ops/" + ticket);
+          else renderOps();
+        });
+      };
+    });
+  }
+
+  function renderOpsTicket(id) {
+    var gen = viewGen;
+    shell("<section class=\"panel\"><h1>Ticket</h1><p class=\"muted\">Loading…</p></section>");
+    Promise.all([
+      db.from("ops_tickets").select("*, customers(name, account_number, address, lp, nap, port)").eq("id", id).maybeSingle(),
+      db.from("ticket_notes").select("*").eq("ticket_id", id).order("created_at"),
+      db.from("ticket_materials").select("*").eq("ticket_id", id),
+      db.from("ticket_photos").select("*").eq("ticket_id", id),
+      db.from("staff").select("id, name, role, active").eq("active", true).order("name")
+    ]).then(function (parts) {
+      if (gen !== viewGen) return;
+      if (parts[0].error || !parts[0].data) return flash(parts[0].error ? errText(parts[0].error) : "Ticket not found.");
+      var row = parts[0].data;
+      var person = row.customers || {};
+      var notes = parts[1].error ? [] : (parts[1].data || []);
+      var materials = parts[2].error ? [] : (parts[2].data || []);
+      var photos = parts[3].error ? [] : (parts[3].data || []);
+      var staff = parts[4].error ? [] : (parts[4].data || []);
+      var techs = staff.filter(function (item) { return item.role === "tech"; });
+      shell("<section class=\"panel\"><p><a href=\"#ops\">All tickets</a></p><h1>" + esc(row.ticket_no) + "</h1>" +
+        "<p class=\"muted\">" + esc(opsTypeLabel(row.ticket_type)) + " · " + esc(person.name || "No customer") + (person.account_number ? " · " + esc(person.account_number) : "") + "</p>" +
+        "<form id=\"ops-edit\" class=\"grid two\">" +
+        "<div class=\"field\"><label>Status</label><select id=\"ops-status\">" + OPS_STATUSES.map(function (item) {
+          return "<option" + (item === row.status ? " selected" : "") + ">" + esc(item) + "</option>";
+        }).join("") + "</select></div>" +
+        "<div class=\"field\"><label>Tech</label><select id=\"ops-assign\"><option value=\"\">Unassigned</option>" + techs.map(function (item) {
+          return "<option value=\"" + item.id + "\"" + (item.id === row.assigned_to ? " selected" : "") + ">" + esc(item.name) + "</option>";
+        }).join("") + "</select></div>" +
+        "<div class=\"field\"><label>Helpers</label><select id=\"ops-helpers\" multiple size=\"4\">" + techs.map(function (item) {
+          var on = (row.helpers || []).indexOf(item.id) >= 0;
+          return "<option value=\"" + item.id + "\"" + (on ? " selected" : "") + ">" + esc(item.name) + "</option>";
+        }).join("") + "</select></div>" +
+        "<div class=\"field\"><label>Issue</label><input id=\"ops-issue\" value=\"" + esc(row.issue || "") + "\"></div>" +
+        "<div class=\"field\"><label>Notes</label><textarea id=\"ops-notes\">" + esc(row.notes || "") + "</textarea></div>" +
+        "<button class=\"btn\" type=\"submit\">Save assignment</button></form></section>" +
+        "<section class=\"panel\"><h2>Materials na ginamit</h2><ul>" + (materials.map(function (item) {
+          return "<li>" + esc(item.item) + " × " + esc(item.qty) + (item.unit_cost == null ? " (no price yet)" : " · ₱" + esc(item.unit_cost)) + "</li>";
+        }).join("") || "<li>None yet</li>") + "</ul>" +
+        "<form id=\"mat-form\" class=\"grid two\"><div class=\"field\"><label>Item</label><select id=\"mat-item\">" + MATERIAL_ITEMS.map(function (item) { return "<option>" + esc(item) + "</option>"; }).join("") + "</select></div>" +
+        "<div class=\"field\"><label>Qty</label><input id=\"mat-qty\" type=\"number\" min=\"0.01\" step=\"0.01\" value=\"1\"></div>" +
+        "<button class=\"btn\" type=\"submit\">Add material</button></form></section>" +
+        "<section class=\"panel\"><h2>Notes</h2>" + notes.map(function (item) {
+          return "<p><strong>" + esc(item.created_by || "note") + "</strong> · " + esc(item.body) + "</p>";
+        }).join("") +
+        "<form id=\"note-form\" class=\"grid\"><div class=\"field\"><label>Add note</label><textarea id=\"note-body\"></textarea></div><button class=\"btn\" type=\"submit\">Add note</button></form></section>" +
+        "<section class=\"panel\"><h2>Photos</h2>" + photos.map(function (item) {
+          return "<p><button type=\"button\" class=\"btn secondary\" data-photo=\"" + esc(item.path) + "\">View</button></p>";
+        }).join("") +
+        "<form id=\"photo-form\"><input id=\"photo-file\" type=\"file\" accept=\"image/jpeg,image/png,image/webp\" required> <button class=\"btn\" type=\"submit\">Upload</button></form></section>" +
+        (row.ticket_type === "INSTALLATION" ? "<section class=\"panel\"><h2>Installation tapos</h2><p class=\"muted\">PPPoE is generated from the account number. Cash or GCash records the installation fee.</p>" +
+          "<form id=\"done-form\" class=\"grid two\">" +
+          "<div class=\"field\"><label>LP</label><input id=\"done-lp\" value=\"" + esc(person.lp || "") + "\"></div>" +
+          "<div class=\"field\"><label>NAP</label><input id=\"done-nap\" value=\"" + esc(person.nap || "") + "\"></div>" +
+          "<div class=\"field\"><label>Port</label><input id=\"done-port\" value=\"" + esc(person.port || "") + "\"></div>" +
+          "<div class=\"field\"><label>Modem serial</label><input id=\"done-serial\"></div>" +
+          "<div class=\"field\"><label>Bayad</label><select id=\"done-method\"><option value=\"cash\">Cash</option><option value=\"gcash\">GCash</option></select></div>" +
+          "<div class=\"field\"><label>Amount</label><input id=\"done-amount\" type=\"number\" min=\"0\" step=\"0.01\" placeholder=\"Installation fee\"></div>" +
+          "<div class=\"field\"><label>GCash ref</label><input id=\"done-ref\"></div>" +
+          "<button class=\"btn\" type=\"submit\">Mark installed</button></form></section>" : "") +
+        "<section class=\"panel\"><h2>Close ticket</h2><form id=\"resolve-form\" class=\"grid\"><div class=\"field\"><label>Resolution</label><textarea id=\"resolve-text\">" + esc(row.resolution || "") + "</textarea></div><button class=\"btn\" type=\"submit\">Mark resolved</button></form>" +
+        "<p class=\"muted\">Closing posts Operational expenses for SC connector, modem, rewiring, and power adaptor when a price is set. The account code comes from the investor.</p></section>");
+      document.getElementById("ops-edit").onsubmit = function (event) {
+        event.preventDefault();
+        var helpers = Array.prototype.map.call(document.getElementById("ops-helpers").selectedOptions, function (option) { return option.value; });
+        db.from("ops_tickets").update({
+          status: document.getElementById("ops-status").value,
+          assigned_to: document.getElementById("ops-assign").value || null,
+          helpers: helpers,
+          issue: document.getElementById("ops-issue").value.trim() || null,
+          notes: document.getElementById("ops-notes").value.trim() || null
+        }).eq("id", id).then(function (update) {
+          if (update.error) return flash(errText(update.error));
+          flash("Saved.", true);
+          renderOpsTicket(id);
+        });
+      };
+      document.getElementById("mat-form").onsubmit = function (event) {
+        event.preventDefault();
+        db.rpc("tech_add_material", {
+          p_ticket: id,
+          p_item: document.getElementById("mat-item").value,
+          p_qty: Number(document.getElementById("mat-qty").value)
+        }).then(function (result) {
+          if (result.error) return flash(errText(result.error));
+          renderOpsTicket(id);
+        });
+      };
+      document.getElementById("note-form").onsubmit = function (event) {
+        event.preventDefault();
+        db.rpc("tech_add_note", { p_ticket: id, p_body: document.getElementById("note-body").value }).then(function (result) {
+          if (result.error) return flash(errText(result.error));
+          renderOpsTicket(id);
+        });
+      };
+      document.getElementById("photo-form").onsubmit = function (event) {
+        event.preventDefault();
+        var file = document.getElementById("photo-file").files[0];
+        if (!file) return;
+        uploadTicketPhoto(id, file).then(function (insert) {
+          if (insert.error) return flash(errText(insert.error));
+          flash("Photo saved.", true);
+          renderOpsTicket(id);
+        }).catch(function (error) { flash(errText(error)); });
+      };
+      app.querySelectorAll("[data-photo]").forEach(function (button) {
+        button.onclick = function () {
+          db.storage.from("ticket-photos").createSignedUrl(button.getAttribute("data-photo"), 3600).then(function (signed) {
+            if (signed.error || !signed.data) return flash(errText(signed.error));
+            window.open(signed.data.signedUrl, "_blank", "noopener");
+          });
+        };
+      });
+      var done = document.getElementById("done-form");
+      if (done) done.onsubmit = function (event) {
+        event.preventDefault();
+        var amount = document.getElementById("done-amount").value;
+        db.rpc("complete_installation", {
+          p_ticket: id,
+          p_lp: document.getElementById("done-lp").value.trim(),
+          p_nap: document.getElementById("done-nap").value.trim(),
+          p_port: document.getElementById("done-port").value.trim(),
+          p_modem_serial: document.getElementById("done-serial").value.trim(),
+          p_pay_method: document.getElementById("done-method").value,
+          p_pay_amount: amount === "" ? null : Number(amount),
+          p_pay_ref: document.getElementById("done-ref").value.trim()
+        }).then(function (result) {
+          if (result.error) return flash(errText(result.error));
+          flash("Installed. PPPoE " + ((result.data && result.data.pppoe) || ""), true);
+          renderOpsTicket(id);
+        });
+      };
+      document.getElementById("resolve-form").onsubmit = function (event) {
+        event.preventDefault();
+        db.rpc("resolve_ops_ticket", { p_ticket: id, p_resolution: document.getElementById("resolve-text").value }).then(function (result) {
+          if (result.error) return flash(errText(result.error));
+          flash("Resolved. Expenses posted: " + ((result.data && result.data.expenses) || 0), true);
+          renderOpsTicket(id);
+        });
+      };
+    });
+  }
+
   function render() {
     viewGen += 1;
     var current = route();
@@ -3039,6 +3465,9 @@
     if (current.name === "payments") return renderPayments();
     if (current.name === "map") return renderMap();
     if (current.name === "repairs") return renderRepairs();
+    if (current.name === "ops") return renderOps();
+    if (current.name === "staff") return renderStaff();
+    if (current.name === "modems") return renderModems();
     if (current.name === "settings") return renderSettings();
     if (current.name === "customers") return renderCustomers();
     return renderDashboard();
