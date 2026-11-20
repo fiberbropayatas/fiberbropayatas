@@ -3801,7 +3801,11 @@
         "<input id=\"acct-id\" type=\"hidden\">" +
         "<button class=\"btn\" type=\"submit\">Save splits</button></form></section>" +
         "<div class=\"table-wrap\"><table><thead><tr><th>Code</th><th>Label</th><th>Kind</th><th>Parties</th><th></th></tr></thead><tbody>" +
-        (body || "<tr><td colspan=\"5\">No accounts yet.</td></tr>") + "</tbody></table></div>");
+        (body || "<tr><td colspan=\"5\">No accounts yet.</td></tr>") + "</tbody></table></div>" +
+        "<section class=\"panel\"><h2>Investor parties</h2><p class=\"muted\">One Gmail can have several parties, one per line. Example: ANN and ANN-AINA.</p>" +
+        "<form id=\"party-form\" class=\"grid\"><div class=\"field\"><label>Investor Gmail</label><input id=\"party-email\" type=\"email\" required></div>" +
+        "<div class=\"field\"><label>Parties</label><textarea id=\"party-list\" placeholder=\"ANN&#10;ANN-AINA\"></textarea></div>" +
+        "<button class=\"btn\" type=\"submit\">Save parties</button></form></section>");
       document.getElementById("acct-form").onsubmit = function (event) {
         event.preventDefault();
         var splits = document.getElementById("acct-splits").value.split(/\n/).map(function (line) {
@@ -3819,6 +3823,17 @@
           if (saved.error) return flash(errText(saved.error));
           flash("Splits saved.", true);
           renderAccounts();
+        });
+      };
+      var partyForm = document.getElementById("party-form");
+      if (partyForm) partyForm.onsubmit = function (event) {
+        event.preventDefault();
+        db.rpc("set_investor_parties", {
+          p_email: document.getElementById("party-email").value.trim(),
+          p_parties: document.getElementById("party-list").value
+        }).then(function (saved) {
+          if (saved.error) return flash(errText(saved.error));
+          flash("Parties saved.", true);
         });
       };
       app.querySelectorAll("[data-edit]").forEach(function (button) {

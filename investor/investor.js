@@ -19,23 +19,33 @@
     return "₱" + num.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  function linesHtml(lines) {
+    return (lines || []).map(function (row) {
+      var shares = (row.shares || []).map(function (item) {
+        return esc(item.party) + " " + esc(item.percent) + "% · " + esc(money(item.share));
+      }).join("<br>");
+      return "<p><strong>" + esc(row.code) + "</strong> · gross " + esc(money(row.gross)) + " · left " + esc(money(row.amount_left)) + "<br>" + shares + "</p>";
+    }).join("") || "<p>No lines in this report.</p>";
+  }
+
   function show(data) {
+    var parties = data.parties || [];
     var cards = (data.accounts || []).map(function (row) {
       var statuses = Object.keys(row.by_status || {}).map(function (key) {
         return esc(key) + " " + esc(row.by_status[key]);
       }).join(", ");
-      return "<article class=\"panel\"><h2>" + esc(row.code) + "</h2>" +
-        "<p class=\"muted\">" + esc(row.label || "") + "</p>" +
-        "<p>Customers: " + esc(row.customers) + (statuses ? " · " + statuses : "") + "</p>" +
-        "<p>Collections " + esc(money(row.collections)) + " · Operational " + esc(money(row.operational)) + "</p>" +
-        "<p>Gross " + esc(money(row.gross)) + " · Amount left " + esc(money(row.amount_left)) + "</p>" +
-        "<p>Your share " + esc(row.my_percent == null ? "—" : row.my_percent + "%") + " · " + esc(money(row.my_share)) + "</p>" +
-        "<p class=\"muted\">Personal expenses already taken off: " + esc(money(row.my_personal)) + "</p></article>";
+      return "<article class=\"panel\"><h2>" + esc(row.code) + "</h2><p class=\"muted\">" + esc(row.label || "") + "</p><p>Customers: " + esc(row.customers) + (statuses ? " · " + statuses : "") + "</p></article>";
     }).join("");
-    app.innerHTML = "<section class=\"panel\"><h1>" + esc(data.party || "Investor") + "</h1>" +
-      "<p class=\"muted\">Only the accounts where this party has a split. MAL and AL are not included.</p>" +
+    var draft = data.draft;
+    var locked = data.locked || [];
+    app.innerHTML = "<section class=\"panel\"><h1>" + esc(parties.join(", ") || "Investor") + "</h1>" +
+      "<p class=\"muted\">Only the accounts where your parties have a split.</p>" +
       "<button type=\"button\" class=\"btn secondary\" id=\"out\">Sign out</button></section>" +
-      (cards || "<section class=\"panel\"><p>No accounts for this party yet. An admin builds the cut-off report first.</p></section>");
+      (cards || "<section class=\"panel\"><p>No accounts for these parties.</p></section>") +
+      "<section class=\"panel\"><h2>Draft</h2>" + (draft ? "<p>" + esc(draft.label) + " · " + esc(draft.cutoff_start) + " to " + esc(draft.cutoff_end) + "</p>" + linesHtml(draft.lines) : "<p>No draft.</p>") + "</section>" +
+      "<section class=\"panel\"><h2>Locked</h2>" + (locked.length ? locked.map(function (row) {
+        return "<h3>" + esc(row.cutoff_start) + " to " + esc(row.cutoff_end) + "</h3>" + linesHtml(row.lines);
+      }).join("") : "<p>No locked report.</p>") + "</section>";
     document.getElementById("out").onclick = function () { db.auth.signOut(); };
   }
 

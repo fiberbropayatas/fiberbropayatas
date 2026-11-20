@@ -5181,25 +5181,6 @@ end $$;
 alter table public.expenses add constraint expenses_side_check
   check (expense_side is null or expense_side in ('operational', 'personal'));
 
-create or replace function public.map_account_code(p_code text)
-returns text
-language sql
-immutable
-set search_path = public
-as $$
-  select case upper(btrim(coalesce(p_code, '')))
-    when '' then null
-    when 'MAL' then null
-    when 'AL' then null
-    when 'A' then 'ALVIN'
-    when 'J' then 'JOLLI'
-    when 'AJ' then 'AINA'
-    when 'NELSONANN' then 'NELSON'
-    when 'HADJ' then 'HADJ'
-    else upper(btrim(p_code))
-  end;
-$$;
-
 create or replace function public.commission_line(
   p_gross numeric,
   p_operational numeric,
@@ -5242,20 +5223,15 @@ begin
   end if;
 end $$;
 
-create or replace function public.customer_account_code(p_customer uuid)
-returns text
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select a.code
-  from public.customers c
-  join public.investors i on i.id = c.investor_id
-  join public.investor_accounts a on a.code = public.map_account_code(i.code) and a.active
-  where c.id = p_customer
-    and public.map_account_code(i.code) is not null;
-$$;
+create table if not exists public.investor_parties (
+  id uuid primary key default gen_random_uuid(),
+  staff_id uuid not null references public.staff (id) on delete cascade,
+  party text not null,
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists investor_parties_uidx
+  on public.investor_parties (staff_id, upper(party));
 
 create table if not exists public.investor_splits (
   id uuid primary key default gen_random_uuid(),
@@ -5360,11 +5336,12 @@ security definer
 set search_path = public
 as $$
   select exists (
-    select 1 from public.staff
-    where lower(email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-      and role = 'investor'
-      and active
-      and nullif(btrim(investor_party), '') is not null
+    select 1
+    from public.staff s
+    join public.investor_parties ip on ip.staff_id = s.id
+    where lower(s.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+      and s.role = 'investor'
+      and s.active
   );
 $$;
 
@@ -5412,6 +5389,7 @@ begin
       from public.expenses
       where expense_date between $1 and $2
         and upper(coalesce(account_code, '')) = upper($3)
+        and status = 'approved'
         and (
           expense_side = 'operational'
           or category = 'Operational'
@@ -5423,6 +5401,7 @@ begin
     from public.expenses
     where expense_date between p_start and p_end
       and upper(coalesce(account_code, '')) = upper(p_code)
+      and status = 'approved'
       and (expense_side = 'operational' or category = 'Operational');
   end if;
   return coalesce(total, 0);
@@ -5486,10 +5465,10 @@ begin
     for split in
       select * from public.investor_splits where account_id = acc.id order by party
     loop
-      select coalesce(sum(amount), 0) into personal
-      from public.investor_personal_expenses
-      where account_id = acc.id and upper(party) = upper(split.party)
-        and spent_on between p_start and p_end;
+      select coalesce(sum(pe.amount), 0) into personal
+      from public.investor_personal_expenses pe
+      where pe.account_id = acc.id and upper(pe.party) = upper(split.party)
+        and pe.spent_on between p_start and p_end;
       line := public.commission_line(gross, operational, split.percent, personal);
       parties := parties || jsonb_build_array(jsonb_build_object(
         'party', split.party,
@@ -5560,7 +5539,7 @@ begin
   if not public.is_admin() then
     raise exception 'Only an admin can edit account splits.';
   end if;
-  if public.map_account_code(p_code) is null or upper(btrim(p_code)) in ('MAL', 'AL') then
+  if p_code is null or upper(btrim(p_code)) in ('', 'MAL', 'AL') then
     raise exception 'MAL and AL are not part of the system.';
   end if;
   select coalesce(sum((split_row.item ->> 'percent')::numeric), 0) into total
@@ -5632,6 +5611,32 @@ begin
 end;
 $$;
 
+create or replace function public.investor_report_lines(p_snapshot jsonb, p_parties text[])
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'code', item.obj ->> 'code',
+    'gross', item.obj -> 'gross',
+    'operational', item.obj -> 'operational',
+    'amount_left', item.obj -> 'amount_left',
+    'shares', (
+      select coalesce(jsonb_agg(share.obj), '[]'::jsonb)
+      from jsonb_array_elements(item.obj -> 'parties') as share(obj)
+      where upper(share.obj ->> 'party') = any (select upper(x) from unnest(p_parties) as x)
+    )
+  )), '[]'::jsonb)
+  from jsonb_array_elements(coalesce(p_snapshot, '[]'::jsonb)) as item(obj)
+  where exists (
+    select 1
+    from jsonb_array_elements(item.obj -> 'parties') as share(obj)
+    where upper(share.obj ->> 'party') = any (select upper(x) from unnest(p_parties) as x)
+  );
+$$;
+
 create or replace function public.investor_portal()
 returns json
 language plpgsql
@@ -5639,73 +5644,116 @@ security definer
 set search_path = public
 as $$
 declare
-  party text;
-  latest jsonb;
-  accounts jsonb := '[]'::jsonb;
-  acc record;
-  report jsonb;
-  mine jsonb;
+  v_staff uuid;
+  v_parties text[];
+  v_accounts jsonb := '[]'::jsonb;
+  v_acc record;
+  v_draft jsonb;
+  v_locked jsonb;
 begin
-  select investor_party into party
-  from public.staff
-  where lower(email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-    and role = 'investor' and active
+  select s.id into v_staff
+  from public.staff s
+  where lower(s.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+    and s.role = 'investor'
+    and s.active
   limit 1;
-  if party is null then
+  if v_staff is null then
     raise exception 'This login is not linked to an investor party.';
   end if;
-  select snapshot into latest
-  from public.commission_runs
-  order by (status = 'locked') desc, cutoff_end desc
-  limit 1;
+  select coalesce(array_agg(ip.party), '{}') into v_parties
+  from public.investor_parties ip
+  where ip.staff_id = v_staff;
+  if coalesce(array_length(v_parties, 1), 0) = 0 then
+    raise exception 'This login is not linked to an investor party.';
+  end if;
 
-  for acc in
-    select a.*
+  for v_acc in
+    select distinct a.code, a.label
     from public.investor_accounts a
     join public.investor_splits s on s.account_id = a.id
-    where a.active and upper(s.party) = upper(party) and upper(a.code) not in ('MAL', 'AL')
+    where a.active
+      and upper(a.code) not in ('MAL', 'AL')
+      and upper(s.party) = any (select upper(x) from unnest(v_parties) as x)
     order by a.code
   loop
-    report := null;
-    mine := null;
-    if latest is not null then
-      select elem.obj into report
-      from jsonb_array_elements(latest) as elem(obj)
-      where elem.obj ->> 'code' = acc.code
-      limit 1;
-      if report is not null then
-        select elem.obj into mine
-        from jsonb_array_elements(report -> 'parties') as elem(obj)
-        where upper(elem.obj ->> 'party') = upper(party)
-        limit 1;
-      end if;
-    end if;
-    accounts := accounts || jsonb_build_array(jsonb_build_object(
-      'code', acc.code,
-      'label', acc.label,
+    v_accounts := v_accounts || jsonb_build_array(jsonb_build_object(
+      'code', v_acc.code,
+      'label', v_acc.label,
       'customers', coalesce((
         select count(*) from public.customers c
-        where public.customer_account_code(c.id) = acc.code
+        where public.customer_account_code(c.id) = v_acc.code
       ), 0),
       'by_status', coalesce((
-        select jsonb_object_agg(status_name, status_count)
+        select jsonb_object_agg(grouped.status_name, grouped.status_count)
         from (
           select coalesce(nullif(c.account_status, ''), c.stage, 'unknown') as status_name, count(*) as status_count
           from public.customers c
-          where public.customer_account_code(c.id) = acc.code
+          where public.customer_account_code(c.id) = v_acc.code
           group by 1
         ) grouped
-      ), '{}'::jsonb),
-      'collections', coalesce(report -> 'collections', '0'::jsonb),
-      'operational', coalesce(report -> 'operational', '0'::jsonb),
-      'gross', coalesce(report -> 'gross', '0'::jsonb),
-      'amount_left', coalesce(report -> 'amount_left', '0'::jsonb),
-      'my_percent', mine -> 'percent',
-      'my_personal', mine -> 'personal',
-      'my_share', mine -> 'share'
+      ), '{}'::jsonb)
     ));
   end loop;
-  return json_build_object('party', party, 'accounts', accounts);
+
+  select jsonb_build_object(
+    'label', 'Draft',
+    'cutoff_start', r.cutoff_start,
+    'cutoff_end', r.cutoff_end,
+    'lines', public.investor_report_lines(r.snapshot, v_parties)
+  ) into v_draft
+  from public.commission_runs r
+  where r.status = 'draft'
+  order by r.cutoff_end desc
+  limit 1;
+
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'cutoff_start', r.cutoff_start,
+    'cutoff_end', r.cutoff_end,
+    'lines', public.investor_report_lines(r.snapshot, v_parties)
+  ) order by r.cutoff_end desc), '[]'::jsonb) into v_locked
+  from public.commission_runs r
+  where r.status = 'locked';
+
+  return json_build_object(
+    'parties', to_jsonb(v_parties),
+    'accounts', v_accounts,
+    'draft', v_draft,
+    'locked', coalesce(v_locked, '[]'::jsonb)
+  );
+end;
+$$;
+
+create or replace function public.set_investor_parties(p_email text, p_parties text)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_staff uuid;
+  v_line text;
+begin
+  if not public.is_admin() then
+    raise exception 'Only an admin can link investor parties.';
+  end if;
+  select s.id into v_staff
+  from public.staff s
+  where lower(s.email) = lower(btrim(p_email))
+    and s.role = 'investor'
+    and s.active;
+  if v_staff is null then
+    raise exception 'Add this Gmail as an active investor on the staff list first.';
+  end if;
+  delete from public.investor_parties ip where ip.staff_id = v_staff;
+  foreach v_line in array regexp_split_to_array(coalesce(p_parties, ''), E'\\r?\\n|,')
+  loop
+    if nullif(btrim(v_line), '') is null then
+      continue;
+    end if;
+    insert into public.investor_parties (staff_id, party)
+    values (v_staff, btrim(v_line));
+  end loop;
+  return json_build_object('ok', true);
 end;
 $$;
 
@@ -5721,7 +5769,7 @@ begin
       ('AINA', 'AINA', false, '[{"party":"ALVIN","percent":45},{"party":"GW","percent":12},{"party":"AINA","percent":43}]'::jsonb),
       ('NELSON', 'NELSON', false, '[{"party":"ALVIN","percent":55},{"party":"ANN-AINA","percent":30},{"party":"GW","percent":15}]'::jsonb),
       ('HADJ', 'HADJ', false, '[{"party":"ALVIN","percent":55},{"party":"HADJIE","percent":30},{"party":"GW","percent":15}]'::jsonb),
-      ('LOKAL(NELSONHADJ)', 'LOKAL (NELSONHADJ)', false, '[{"party":"ALVIN","percent":70},{"party":"HADJIE","percent":15},{"party":"GW","percent":15}]'::jsonb),
+      ('LOKAL', 'NELSONHADJ', false, '[{"party":"ALVIN","percent":70},{"party":"HADJIE","percent":15},{"party":"GW","percent":15}]'::jsonb),
       ('ANN', 'ANN', false, '[{"party":"JOLLI","percent":70},{"party":"ANN","percent":30}]'::jsonb),
       ('REY', 'REY', false, '[{"party":"ALVIN","percent":70},{"party":"REY","percent":30}]'::jsonb),
       ('CHES', 'CHES', false, '[{"party":"ALVIN","percent":70},{"party":"CHES","percent":30}]'::jsonb),
@@ -5748,6 +5796,7 @@ begin
   perform set_config('fiberbro.skip_split_check', '0', true);
 end $$;
 
+alter table public.investor_parties enable row level security;
 alter table public.investor_accounts enable row level security;
 alter table public.investor_splits enable row level security;
 alter table public.extra_income enable row level security;
@@ -5755,6 +5804,7 @@ alter table public.pahabol enable row level security;
 alter table public.investor_personal_expenses enable row level security;
 alter table public.commission_runs enable row level security;
 
+revoke all on table public.investor_parties from public, anon;
 revoke all on table public.investor_accounts from public, anon;
 revoke all on table public.investor_splits from public, anon;
 revoke all on table public.extra_income from public, anon;
@@ -5762,6 +5812,7 @@ revoke all on table public.pahabol from public, anon;
 revoke all on table public.investor_personal_expenses from public, anon;
 revoke all on table public.commission_runs from public, anon;
 
+grant select, insert, update, delete on public.investor_parties to authenticated;
 grant select, insert, update, delete on public.investor_accounts to authenticated;
 grant select, insert, update, delete on public.investor_splits to authenticated;
 grant select, insert, update, delete on public.extra_income to authenticated;
@@ -5774,7 +5825,7 @@ declare
   tbl text;
 begin
   foreach tbl in array array[
-    'investor_accounts', 'investor_splits', 'extra_income', 'pahabol',
+    'investor_parties', 'investor_accounts', 'investor_splits', 'extra_income', 'pahabol',
     'investor_personal_expenses', 'commission_runs'
   ]
   loop
@@ -5791,9 +5842,8 @@ begin
 end $$;
 
 revoke execute on function
-  public.map_account_code(text),
   public.commission_line(numeric, numeric, numeric, numeric),
-  public.customer_account_code(uuid),
+  public.investor_report_lines(jsonb, text[]),
   public.investor_splits_check(),
   public.commission_actor(),
   public.pullout_fees(date, date, text),
@@ -5806,7 +5856,8 @@ revoke execute on function
   public.lock_commission(uuid),
   public.save_investor_account(uuid, text, text, boolean, jsonb),
   public.add_commission_item(text, uuid, numeric, date, text, text, uuid),
-  public.investor_portal()
+  public.investor_portal(),
+  public.set_investor_parties(text, text)
   from public, anon;
 
 grant execute on function public.is_investor() to authenticated;
@@ -5815,3 +5866,4 @@ grant execute on function public.lock_commission(uuid) to authenticated;
 grant execute on function public.save_investor_account(uuid, text, text, boolean, jsonb) to authenticated;
 grant execute on function public.add_commission_item(text, uuid, numeric, date, text, text, uuid) to authenticated;
 grant execute on function public.investor_portal() to authenticated;
+grant execute on function public.set_investor_parties(text, text) to authenticated;
