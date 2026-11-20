@@ -54,7 +54,7 @@
       ["plan_status", "Plan Status", "text"]
     ]},
     { title: "Billing", fields: [
-      ["due_date_number", "Due Date Number", "int"],
+      ["due_date_number", "Due day of month", "int"],
       ["original_due_date", "Original Due Date", "date"],
       ["monthly_bill", "Monthly Bill", "money"],
       ["current_bill", "Current Bill", "money"],
@@ -379,7 +379,9 @@
     ["Billing", [
       ["billing", "Billing", "billing"],
       ["payments", "Payments", "payments"],
-      ["finance", "Finance", "billing"]
+      ["finance", "Finance", "billing"],
+      ["gcash", "GCash refs", "payments"],
+      ["logbook", "Logbook", "tickets"]
     ]],
     ["Network", [
       ["map", "Map", "map"],
@@ -398,6 +400,8 @@
     billing: "Billing",
     payments: "Payments",
     finance: "Finance",
+    gcash: "GCash refs",
+    logbook: "Logbook",
     map: "Map",
     repairs: "Repairs",
     investors: "Investors",
@@ -539,7 +543,7 @@
     setChrome("guest");
     if (who) who.innerHTML = "";
     if (pageTitle) pageTitle.textContent = "Sign in";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261120b\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261120b\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261120d\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261120d\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -1243,16 +1247,41 @@
     return "<svg class=\"chart pie\" viewBox=\"0 0 140 140\" role=\"img\">" + slices + "</svg><div class=\"legend\">" + legend + "</div>";
   }
 
+  function manilaDate(value) {
+    var date = value ? new Date(value) : new Date();
+    if (isNaN(date.getTime())) return "";
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).format(date);
+  }
+
+  function maybeGenerateBills() {
+    var key = "fiberbro-bills-" + manilaDate();
+    try {
+      if (localStorage.getItem(key)) return Promise.resolve();
+    } catch (err) {}
+    return db.rpc("generate_upcoming_bills").then(function () {
+      try { localStorage.setItem(key, "1"); } catch (err) {}
+    }).catch(function () {});
+  }
+
   function renderDashboard() {
     var gen = viewGen;
     shell("<section class=\"panel\"><h1>Dashboard</h1><p class=\"muted\">Loading…</p></section>");
     var month = manilaPeriod();
-    Promise.all([
+    maybeGenerateBills().then(function () {
+    return Promise.all([
       db.from("customers").select("id, stage"),
-      db.from("invoices").select("status, amount, period"),
+      db.from("invoices").select("status, amount, period, due_date, period_label, bill_number, customers(name, account_number)"),
       db.from("payments").select("status, amount, submitted_at, confirmed_at"),
-      db.from("repair_tickets").select("status")
-    ]).then(function (parts) {
+      db.from("repair_tickets").select("status"),
+      db.from("virtual_logbook").select("status").then(function (r) { return r.error ? { data: [] } : r; }).catch(function () { return { data: [] }; }),
+      db.from("gcash_refs").select("status, duplicate_flag").then(function (r) { return r.error ? { data: [] } : r; }).catch(function () { return { data: [] }; })
+    ]);
+    }).then(function (parts) {
       parts.forEach(function (part) { if (part.error) throw part.error; });
       var customers = parts[0].data || [];
       var invoices = parts[1].data || [];
@@ -1272,7 +1301,32 @@
       }).reduce(function (sum, row) { return sum + Number(row.amount || 0); }, 0);
       var openRepairs = repairs.filter(function (row) { return row.status !== "resolved"; }).length;
       if (gen !== viewGen) return;
+      var today = manilaDate();
+      var todayTotal = payments.filter(function (row) {
+        return row.status === "confirmed" && manilaDate(row.confirmed_at || row.submitted_at) === today;
+      }).reduce(function (sum, row) { return sum + Number(row.amount || 0); }, 0);
+      var unmatchedProofs = (parts[4].data || []).filter(function (row) { return row.status !== "processed"; }).length;
+      var openRefs = (parts[5].data || []).filter(function (row) { return row.status !== "processed" && !row.duplicate_flag; }).length;
+      var dueSoon = invoices.filter(function (row) {
+        if (row.status !== "unpaid" && row.status !== "pending") return false;
+        if (!row.due_date) return false;
+        var start = new Date(today + "T00:00:00");
+        var due = new Date(String(row.due_date).slice(0, 10) + "T00:00:00");
+        var end = new Date(start.getTime());
+        end.setDate(end.getDate() + 10);
+        return due >= start && due <= end;
+      });
+      var soaList = dueSoon.map(function (row) {
+        var person = row.customers || {};
+        var message = "Hi " + (person.name || "customer") + ", ito ang SOA mo para sa " + (row.period_label || row.period || "") + ". Bill " + (row.bill_number || "—") + ". Amount " + money(row.amount) + ". Due " + (row.due_date || "—") + ". Pakibayad sa GCash. Salamat, FiberBro.";
+        return "<p><strong>" + esc(person.name || "Customer") + "</strong> · " + esc(row.period_label || row.period || "") + " · " + esc(money(row.amount)) +
+          " <button type=\"button\" class=\"btn secondary\" data-copy=\"" + esc(message) + "\">Copy message</button></p>";
+      }).join("") || "<p class=\"muted\">Walang SOA na due sa susunod na 10 araw.</p>";
       var cards = [
+        ["Today's collection", money(todayTotal), "payments", "red"],
+        ["Unmatched proofs", unmatchedProofs, "tickets", "copper"],
+        ["Unprocessed GCash refs", openRefs, "billing", "copper"],
+        ["Bills due in 10 days", dueSoon.length, "customers", "red"],
         ["Customers", customers.length, "customers", "red"],
         ["Inquiry", stageCounts.inquiry || 0, "tickets", "gray"],
         ["In Progress", stageCounts.in_progress || 0, "repairs", "copper"],
@@ -1292,7 +1346,18 @@
       }));
       shell("<section class=\"panel\"><h1>Dashboard</h1><div class=\"stat-grid\">" + cards + "</div></section>" +
         "<div class=\"chart-grid\"><section class=\"panel\"><h2>Customers by stage</h2>" + bars + "</section>" +
-        "<section class=\"panel\"><h2>Invoice status</h2>" + pie + "</section></div>");
+        "<section class=\"panel\"><h2>Invoice status</h2>" + pie + "</section></div>" +
+        "<section class=\"panel\"><h2>SOA ready to send</h2><p class=\"muted\">Bills due within 10 days. Copy the message, then send it on the Facebook page. Hindi ito auto-send.</p>" + soaList + "</section>");
+      app.querySelectorAll("[data-copy]").forEach(function (button) {
+        button.onclick = function () {
+          var text = button.getAttribute("data-copy");
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function () { flash("Message copied.", true); });
+          } else {
+            flash(text);
+          }
+        };
+      });
     }).catch(function (error) { flash(errText(error)); });
   }
 
@@ -2485,7 +2550,8 @@
         ["gcash_qr_url", "GCash QR image URL"],
         ["payment_note", "Payment note"],
         ["grace_days", "Grace period (days)"],
-        ["installation_fee", "Installation fee (₱)"]
+        ["installation_fee", "Installation fee (₱)"],
+        ["account_number_format", "Account number format"]
       ];
       var values = {};
       (result.data || []).forEach(function (row) { values[row.key] = row.value || ""; });
@@ -2500,7 +2566,7 @@
       document.getElementById("settings-form").onsubmit = function (event) {
         event.preventDefault();
         var writes = fields.map(function (field) {
-          var privateSetting = field[0] === "grace_days" || field[0] === "installation_fee";
+          var privateSetting = field[0] === "grace_days" || field[0] === "installation_fee" || field[0] === "account_number_format";
           return db.from("app_settings").upsert({
             key: field[0],
             value: document.getElementById("set-" + field[0]).value,
@@ -2649,6 +2715,308 @@
     setTimeout(function () { map.invalidateSize(); }, 250);
   }
 
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { flash("Message copied.", true); });
+    } else {
+      flash(text);
+    }
+  }
+
+  function ackMessage(row) {
+    var balance = row.balance_status || (Number(row.remaining || 0) > 0 ? "With balance" : "Cleared");
+    return "Hi " + (row.client_name || "customer") + ", natanggap na namin ang bayad mo.\n" +
+      "Date: " + (row.collection_date || "") + "\nRef: " + (row.gcash_ref || "") + "\nMonth: " + (row.period_label || row.remarks || "") +
+      "\nAmount: " + money(row.amount) + "\nBalance: " + balance + "\nSalamat, FiberBro!";
+  }
+
+  function downloadAck(row) {
+    loadScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js").then(function () {
+      var JsPDF = window.jspdf && window.jspdf.jsPDF;
+      if (!JsPDF) return flash("Could not load the PDF library.");
+      var doc = new JsPDF();
+      doc.setTextColor(255, 0, 0);
+      doc.setFontSize(16);
+      doc.text("FiberBro", 14, 18);
+      doc.setTextColor(30);
+      doc.setFontSize(11);
+      doc.text("Internet Communication Services Corp.", 14, 26);
+      doc.text("Payatas, Quezon City", 14, 32);
+      doc.setFontSize(13);
+      doc.text("ACKNOWLEDGEMENT RECEIPT", 14, 44);
+      doc.setFontSize(11);
+      var lines = [
+        "Name: " + (row.client_name || ""),
+        "Date: " + (row.collection_date || ""),
+        "Reference number: " + (row.gcash_ref || ""),
+        "Month payment: " + (row.period_label || row.remarks || ""),
+        "Amount: " + money(row.amount),
+        "This month balance: " + money(row.remaining || 0),
+        "Balance status: " + (Number(row.remaining || 0) > 0 ? "With balance" : "Cleared"),
+        "Note: " + (row.match_reason || row.remarks || ""),
+        "Cut-off: " + (row.cutoff || ""),
+        "Payment Received - Thank You!"
+      ];
+      lines.forEach(function (line, index) { doc.text(line, 14, 56 + index * 7); });
+      if (row.image_base64) {
+        try {
+          doc.addImage("data:" + (row.content_type || "image/jpeg") + ";base64," + row.image_base64, "JPEG", 120, 40, 75, 100);
+          doc.text("Proof of Payment", 120, 36);
+        } catch (err) {}
+      }
+      doc.save("FiberBro-receipt-" + (row.gcash_ref || "payment") + ".pdf");
+    }).catch(function (error) { flash(errText(error)); });
+  }
+
+  function renderGcash() {
+    var gen = viewGen;
+    shell("<section class=\"panel\"><h1>GCash refs</h1><p class=\"muted\">Loading…</p></section>");
+    Promise.all([
+      db.from("gcash_accounts").select("*").order("name"),
+      db.from("gcash_refs").select("*, gcash_accounts(name)").order("txn_date", { ascending: false })
+    ]).then(function (parts) {
+      if (gen !== viewGen) return;
+      if (parts[0].error) return flash("GCash refs are not ready. Apply supabase/migrations/20261120_phase1_payments.sql. " + errText(parts[0].error));
+      var accounts = parts[0].data || [];
+      var refs = parts[1].error ? [] : (parts[1].data || []);
+      var options = accounts.map(function (row) {
+        return "<option value=\"" + row.id + "\">" + esc(row.name) + "</option>";
+      }).join("");
+      var body = refs.map(function (row) {
+        var acct = (row.gcash_accounts && row.gcash_accounts.name) || "";
+        return "<tr data-account=\"" + esc(row.gcash_account_id || "") + "\" data-date=\"" + esc(row.txn_date || "") + "\">" +
+          "<td data-label=\"Account\">" + esc(acct) + "</td><td data-label=\"Date\">" + esc(row.txn_date || "") + "</td>" +
+          "<td data-label=\"Ref\">" + esc(row.ref_number) + (row.duplicate_flag ? " <span class=\"tag\">duplicate</span>" : "") + "</td>" +
+          "<td data-label=\"Amount\">" + esc(money(row.amount)) + "</td><td data-label=\"Status\">" + statusPill(row.status) + "</td></tr>";
+      }).join("");
+      shell("<section class=\"panel\"><h1>GCash refs</h1>" +
+        "<p class=\"muted\">Paste lines like 2026-11-16 3047334127750 500.00. Spaces in the ref are removed. A repeated ref is saved with a duplicate flag and is not used for matching.</p>" +
+        "<form id=\"gcash-account-form\" class=\"toolbar\"><input id=\"gcash-account-name\" placeholder=\"Receiving account\" required><button class=\"btn\" type=\"submit\">Add account</button></form>" +
+        "<form id=\"gcash-one\" class=\"grid two\">" +
+        "<div class=\"field\"><label for=\"gcash-account\">Receiving account</label><select id=\"gcash-account\" required>" + options + "</select></div>" +
+        "<div class=\"field\"><label for=\"gcash-date\">Date</label><input id=\"gcash-date\" type=\"date\" required></div>" +
+        "<div class=\"field\"><label for=\"gcash-ref\">Ref number</label><input id=\"gcash-ref\" required></div>" +
+        "<div class=\"field\"><label for=\"gcash-amount\">Amount</label><input id=\"gcash-amount\" type=\"number\" min=\"0.01\" step=\"0.01\" required></div>" +
+        "<button class=\"btn\" type=\"submit\">Add one ref</button></form>" +
+        "<form id=\"gcash-bulk\" class=\"grid\"><div class=\"field\"><label for=\"gcash-lines\">Bulk paste</label><textarea id=\"gcash-lines\" placeholder=\"One payment per line\"></textarea></div>" +
+        "<button class=\"btn secondary\" type=\"submit\">Save pasted lines</button></form></section>" +
+        "<div class=\"filters\"><select id=\"gcash-filter-account\"><option value=\"\">All accounts</option>" + options + "</select><input id=\"gcash-filter-date\" type=\"date\"><strong id=\"gcash-total\"></strong></div>" +
+        "<div class=\"table-card\"><table id=\"gcash-table\"><thead><tr><th>Account</th><th>Date</th><th>Ref</th><th>Amount</th><th>Status</th></tr></thead><tbody>" +
+        (body || "<tr><td colspan=\"5\">No refs yet.</td></tr>") + "</tbody></table></div>");
+      function totalVisible() {
+        var account = document.getElementById("gcash-filter-account").value;
+        var date = document.getElementById("gcash-filter-date").value;
+        var sum = 0;
+        var count = 0;
+        app.querySelectorAll("#gcash-table tbody tr").forEach(function (row) {
+          if (!row.getAttribute("data-date")) return;
+          var show = (!account || row.getAttribute("data-account") === account) && (!date || row.getAttribute("data-date") === date);
+          row.hidden = !show;
+          if (show) {
+            count += 1;
+            var amount = row.children[3] ? row.children[3].textContent : "";
+            sum += Number(String(amount).replace(/[^0-9.]/g, "")) || 0;
+          }
+        });
+        document.getElementById("gcash-total").textContent = count + " rows · " + money(sum);
+      }
+      document.getElementById("gcash-filter-account").onchange = totalVisible;
+      document.getElementById("gcash-filter-date").onchange = totalVisible;
+      totalVisible();
+      document.getElementById("gcash-account-form").onsubmit = function (event) {
+        event.preventDefault();
+        db.from("gcash_accounts").insert({ name: document.getElementById("gcash-account-name").value.trim() }).then(function (result) {
+          if (result.error) return flash(errText(result.error));
+          renderGcash();
+        });
+      };
+      document.getElementById("gcash-one").onsubmit = function (event) {
+        event.preventDefault();
+        var line = document.getElementById("gcash-date").value + " " + document.getElementById("gcash-ref").value + " " + Number(document.getElementById("gcash-amount").value).toFixed(2);
+        db.rpc("add_gcash_refs", { p_account: document.getElementById("gcash-account").value, p_lines: line }).then(function (result) {
+          if (result.error) return flash(errText(result.error));
+          flash("Saved. Inserted " + (result.data.inserted || 0) + ", duplicates " + (result.data.duplicates || 0) + ".", true);
+          renderGcash();
+        });
+      };
+      document.getElementById("gcash-bulk").onsubmit = function (event) {
+        event.preventDefault();
+        db.rpc("add_gcash_refs", {
+          p_account: document.getElementById("gcash-account").value,
+          p_lines: document.getElementById("gcash-lines").value
+        }).then(function (result) {
+          if (result.error) return flash(errText(result.error));
+          flash("Saved. Inserted " + (result.data.inserted || 0) + ", duplicates " + (result.data.duplicates || 0) + ", skipped " + (result.data.skipped || 0) + ".", true);
+          renderGcash();
+        });
+      };
+    }).catch(function (error) { flash(errText(error)); });
+  }
+
+  function parseGcashText(text) {
+    var refMatch = text.match(/ref\.?\s*no\.?\s*([0-9 ]{8,})/i);
+    var dateMatch = text.match(/[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}/);
+    var amounts = text.match(/\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+\.\d{2}/g) || [];
+    var best = 0;
+    amounts.forEach(function (item) {
+      var num = Number(String(item).replace(/,/g, ""));
+      if (num > best && num < 1000000) best = num;
+    });
+    var date = "";
+    if (dateMatch) {
+      var parsed = new Date(dateMatch[0]);
+      if (!isNaN(parsed.getTime())) {
+        var month = String(parsed.getMonth() + 1);
+        var day = String(parsed.getDate());
+        if (month.length < 2) month = "0" + month;
+        if (day.length < 2) day = "0" + day;
+        date = parsed.getFullYear() + "-" + month + "-" + day;
+      }
+    }
+    return {
+      ref: refMatch ? refMatch[1].replace(/\D/g, "") : "",
+      amount: best ? best.toFixed(2) : "",
+      date: date
+    };
+  }
+
+  function renderLogbook() {
+    var gen = viewGen;
+    shell("<section class=\"panel\"><h1>Virtual logbook</h1><p class=\"muted\">Loading…</p></section>");
+    Promise.all([
+      db.from("virtual_logbook").select("*").order("created_at", { ascending: false }),
+      db.from("customers").select("id, name, account_number")
+    ]).then(function (parts) {
+      if (gen !== viewGen) return;
+      if (parts[0].error) return flash("Logbook is not ready. Apply supabase/migrations/20261120_phase1_payments.sql. " + errText(parts[0].error));
+      var rows = parts[0].data || [];
+      var people = parts[1].error ? state.customers : (parts[1].data || []);
+      var choices = people.map(function (row) {
+        return "<option value=\"" + row.id + "\">" + esc((row.account_number ? row.account_number + " · " : "") + (row.name || "Customer")) + "</option>";
+      }).join("");
+      var body = rows.map(function (row) {
+        return "<tr><td data-label=\"Date\">" + esc(row.collection_date || "") + "</td>" +
+          "<td data-label=\"Client\">" + esc(row.client_name || "") + "</td>" +
+          "<td data-label=\"Ref\">" + esc(row.gcash_ref || "") + "</td>" +
+          "<td data-label=\"Amount\">" + esc(money(row.amount)) + "</td>" +
+          "<td data-label=\"Cut-off\">" + esc(row.cutoff || "") + "</td>" +
+          "<td data-label=\"Status\">" + esc(row.status) + (row.match_reason ? "<br><span class=\"muted\">" + esc(row.match_reason) + "</span>" : "") + "</td>" +
+          "<td data-label=\"\"><button type=\"button\" class=\"btn secondary\" data-log=\"" + row.id + "\">Open</button></td></tr>";
+      }).join("");
+      shell("<section class=\"panel\"><h1>Virtual logbook</h1>" +
+        "<p class=\"muted\">Portal proofs and staff uploads wait here. Kapag tugma ang ref, amount, at date sa GCash ref, auto-process. Kung hindi, nandito ang reason.</p>" +
+        "<form id=\"log-form\" class=\"grid two\">" +
+        "<div class=\"field\"><label for=\"log-customer\">Customer</label><select id=\"log-customer\"><option value=\"\">Unknown for now</option>" + choices + "</select></div>" +
+        "<div class=\"field\"><label for=\"log-date\">Collection date</label><input id=\"log-date\" type=\"date\" required></div>" +
+        "<div class=\"field\"><label for=\"log-ref\">GCash ref</label><input id=\"log-ref\" required></div>" +
+        "<div class=\"field\"><label for=\"log-amount\">Amount</label><input id=\"log-amount\" type=\"number\" min=\"0.01\" step=\"0.01\" required></div>" +
+        "<div class=\"field\"><label for=\"log-month\">Month / remarks</label><input id=\"log-month\" placeholder=\"Nov_2026\"></div>" +
+        "<div class=\"field\"><label for=\"log-file\">Screenshot from Messenger</label><input id=\"log-file\" type=\"file\" accept=\"image/jpeg,image/png,image/webp\"></div>" +
+        "<div class=\"actions\"><button class=\"btn\" type=\"submit\">Save to queue</button><button type=\"button\" class=\"btn secondary\" id=\"log-ocr\">Read screenshot</button></div></form></section>" +
+        "<div class=\"table-card\"><table><thead><tr><th>Date</th><th>Client</th><th>Ref</th><th>Amount</th><th>Cut-off</th><th>Status</th><th></th></tr></thead><tbody>" +
+        (body || "<tr><td colspan=\"7\">Queue is empty.</td></tr>") + "</tbody></table></div>" +
+        "<section class=\"panel\" id=\"log-detail\" hidden><h2>Review</h2><div id=\"log-detail-body\"></div></section>");
+      document.getElementById("log-ocr").onclick = function () {
+        var file = document.getElementById("log-file").files[0];
+        if (!file) return flash("Choose a screenshot first.");
+        flash("Reading the screenshot…", true);
+        loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js").then(function () {
+          return window.Tesseract.recognize(file, "eng");
+        }).then(function (result) {
+          var parsed = parseGcashText((result && result.data && result.data.text) || "");
+          if (parsed.ref) document.getElementById("log-ref").value = parsed.ref;
+          if (parsed.amount) document.getElementById("log-amount").value = parsed.amount;
+          if (parsed.date) document.getElementById("log-date").value = parsed.date;
+          flash(parsed.ref ? "Fields filled. Please check them." : "No ref was found. Type it in.", true);
+        }).catch(function (error) { flash(errText(error)); });
+      };
+      document.getElementById("log-form").onsubmit = function (event) {
+        event.preventDefault();
+        var file = document.getElementById("log-file").files[0];
+        var customerId = document.getElementById("log-customer").value || null;
+        var person = people.filter(function (row) { return row.id === customerId; })[0];
+        function save(image, mime) {
+          var date = document.getElementById("log-date").value;
+          var ref = document.getElementById("log-ref").value.replace(/\D/g, "");
+          var amount = Number(document.getElementById("log-amount").value);
+          db.from("virtual_logbook").insert({
+            customer_id: customerId,
+            collection_date: date,
+            client_name: person ? person.name : null,
+            mode: "gcash",
+            amount: amount,
+            gcash_ref: ref,
+            remarks: document.getElementById("log-month").value.trim() || null,
+            period_label: document.getElementById("log-month").value.trim() || null,
+            image_base64: image,
+            content_type: mime,
+            source: "admin",
+            logged_by: sessionEmail,
+            entry_type: "Collection"
+          }).then(function (insert) {
+            if (insert.error) return flash(errText(insert.error));
+            flash("Saved. Auto-match runs on the server.", true);
+            renderLogbook();
+          });
+        }
+        if (!file) return save(null, null);
+        var reader = new FileReader();
+        reader.onload = function () {
+          var text = String(reader.result || "");
+          var comma = text.indexOf(",");
+          save(comma >= 0 ? text.slice(comma + 1) : text, file.type || "image/jpeg");
+        };
+        reader.readAsDataURL(file);
+      };
+      app.querySelectorAll("[data-log]").forEach(function (button) {
+        button.onclick = function () {
+          var row = rows.filter(function (item) { return item.id === button.getAttribute("data-log"); })[0];
+          if (!row) return;
+          var box = document.getElementById("log-detail");
+          box.hidden = false;
+          document.getElementById("log-detail-body").innerHTML =
+            "<form id=\"log-edit\" class=\"grid two\">" +
+            "<div class=\"field\"><label>Ref</label><input id=\"edit-ref\" value=\"" + esc(row.gcash_ref || "") + "\"></div>" +
+            "<div class=\"field\"><label>Amount</label><input id=\"edit-amount\" type=\"number\" step=\"0.01\" value=\"" + esc(row.amount || "") + "\"></div>" +
+            "<div class=\"field\"><label>Date</label><input id=\"edit-date\" type=\"date\" value=\"" + esc(row.collection_date || "") + "\"></div>" +
+            "<div class=\"field\"><label>Customer</label><select id=\"edit-customer\"><option value=\"\">Unknown</option>" + people.map(function (person) {
+              return "<option value=\"" + person.id + "\"" + (person.id === row.customer_id ? " selected" : "") + ">" + esc(person.name || person.account_number || "Customer") + "</option>";
+            }).join("") + "</select></div>" +
+            "<p class=\"muted\">" + esc(row.match_reason || row.status) + " · Cut-off " + esc(row.cutoff || "—") + "</p>" +
+            "<div class=\"actions\"><button class=\"btn\" type=\"submit\">Save and match again</button>" +
+            "<button type=\"button\" class=\"btn secondary\" id=\"log-override\">Process anyway</button>" +
+            "<button type=\"button\" class=\"btn secondary\" id=\"log-receipt\">View receipt</button>" +
+            "<button type=\"button\" class=\"btn secondary\" id=\"log-copy\">Copy message + note</button></div></form>";
+          document.getElementById("log-edit").onsubmit = function (event) {
+            event.preventDefault();
+            var chosen = people.filter(function (person) { return person.id === document.getElementById("edit-customer").value; })[0];
+            db.from("virtual_logbook").update({
+              gcash_ref: document.getElementById("edit-ref").value.replace(/\D/g, ""),
+              amount: Number(document.getElementById("edit-amount").value),
+              collection_date: document.getElementById("edit-date").value,
+              customer_id: document.getElementById("edit-customer").value || null,
+              client_name: chosen ? chosen.name : row.client_name,
+              status: "unmatched"
+            }).eq("id", row.id).then(function (update) {
+              if (update.error) return flash(errText(update.error));
+              flash("Saved. The server matches it again.", true);
+              renderLogbook();
+            });
+          };
+          document.getElementById("log-override").onclick = function () {
+            db.rpc("manual_process_logbook", { p_id: row.id }).then(function (result) {
+              if (result.error) return flash(errText(result.error));
+              flash("Processed.", true);
+              renderLogbook();
+            });
+          };
+          document.getElementById("log-receipt").onclick = function () { downloadAck(row); };
+          document.getElementById("log-copy").onclick = function () { copyText(ackMessage(row)); };
+        };
+      });
+    }).catch(function (error) { flash(errText(error)); });
+  }
+
   function render() {
     viewGen += 1;
     var current = route();
@@ -2666,6 +3034,8 @@
     if (current.name === "admins") return renderAdmins();
     if (current.name === "billing") return renderBilling();
     if (current.name === "finance") return renderFinance();
+    if (current.name === "gcash") return renderGcash();
+    if (current.name === "logbook") return renderLogbook();
     if (current.name === "payments") return renderPayments();
     if (current.name === "map") return renderMap();
     if (current.name === "repairs") return renderRepairs();
