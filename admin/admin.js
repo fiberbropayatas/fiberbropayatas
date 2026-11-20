@@ -571,7 +571,7 @@
     setChrome("guest");
     if (who) who.innerHTML = "";
     if (pageTitle) pageTitle.textContent = "Sign in";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261123b\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261123b\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261124a\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261124a\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -3592,12 +3592,20 @@
           if (parts[0].error) return flash(errText(parts[0].error));
           var punches = parts[0].data || [];
           var days = parts[1].error ? [] : (parts[1].data || []);
+          function livenessText(value) {
+            if (!value) return "—";
+            var names = { left: "kaliwa", right: "kanan", nod: "tango" };
+            var name = names[value.challenge] || value.challenge || "";
+            var mark = value.passed ? "pumasa" : "hindi";
+            var ms = value.duration_ms != null ? " · " + value.duration_ms + "ms" : "";
+            return name + " · " + mark + ms;
+          }
           var body = punches.map(function (row) {
-            return "<tr><td>" + esc(row.work_date) + "</td><td>" + esc(row.punch_type) + "</td><td>" + esc(manilaTime(row.punched_at)) + "</td><td>" + esc(row.source) + "</td><td>" + esc(row.reason || "") + "</td>" +
-              "<td><button type=\"button\" class=\"btn secondary\" data-selfie=\"" + row.id + "\">Selfie</button></td></tr>";
+            return "<tr><td>" + esc(row.work_date) + "</td><td>" + esc(row.punch_type) + "</td><td>" + esc(manilaTime(row.punched_at)) + "</td><td>" + esc(row.source) + "</td><td>" + esc(row.reason || "") + "</td><td>" + esc(livenessText(row.liveness)) + "</td>" +
+              "<td><button type=\"button\" class=\"btn secondary\" data-selfie=\"" + row.id + "\">Photos</button></td></tr>";
           }).join("");
-          document.getElementById("dtr-out").innerHTML = "<div class=\"table-wrap\"><table><thead><tr><th>Date</th><th>Punch</th><th>Time</th><th>Source</th><th>Reason</th><th></th></tr></thead><tbody>" +
-            (body || "<tr><td colspan=\"6\">No punches in this cut-off.</td></tr>") + "</tbody></table></div>" +
+          document.getElementById("dtr-out").innerHTML = "<div class=\"table-wrap\"><table><thead><tr><th>Date</th><th>Punch</th><th>Time</th><th>Source</th><th>Reason</th><th>Liveness</th><th></th></tr></thead><tbody>" +
+            (body || "<tr><td colspan=\"7\">No punches in this cut-off.</td></tr>") + "</tbody></table></div><div id=\"photo-strip\"></div>" +
             "<h2>Manual punch</h2><form id=\"man-form\" class=\"grid two\">" +
             "<div class=\"field\"><label>Date</label><input id=\"man-date\" type=\"date\" value=\"" + start + "\" required></div>" +
             "<div class=\"field\"><label>Type</label><select id=\"man-type\"><option value=\"clock_in\">clock in</option><option value=\"lunch_out\">lunch out</option><option value=\"lunch_in\">lunch in</option><option value=\"clock_out\">clock out</option></select></div>" +
@@ -3644,11 +3652,14 @@
           };
           document.getElementById("dtr-out").querySelectorAll("[data-selfie]").forEach(function (button) {
             button.onclick = function () {
-              db.from("attendance_photos").select("content_type, image_base64").eq("punch_id", button.getAttribute("data-selfie")).order("created_at", { ascending: false }).limit(1).then(function (photo) {
+              db.from("attendance_photos").select("content_type, image_base64, created_at").eq("punch_id", button.getAttribute("data-selfie")).order("created_at").limit(5).then(function (photo) {
                 if (photo.error) return flash(errText(photo.error));
-                var row = (photo.data || [])[0];
-                if (!row) return flash("No selfie stored.");
-                window.open("data:" + (row.content_type || "image/jpeg") + ";base64," + row.image_base64, "_blank", "noopener");
+                var rows = photo.data || [];
+                if (!rows.length) return flash("No selfie stored.");
+                document.getElementById("photo-strip").innerHTML = rows.map(function (item) {
+                  var src = "data:" + (item.content_type || "image/jpeg") + ";base64," + item.image_base64;
+                  return "<img alt=\"Punch photo\" src=\"" + src + "\" width=\"96\" height=\"96\" style=\"object-fit:cover;margin:0.25rem;border-radius:8px\">";
+                }).join("");
               });
             };
           });
