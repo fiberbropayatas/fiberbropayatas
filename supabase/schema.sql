@@ -4265,10 +4265,39 @@ create table if not exists public.attendance_days (
   work_date date not null,
   half_day boolean not null default false,
   half_reason text,
+  rest_day_work boolean not null default false,
   ot_hours numeric(8, 2) not null default 0 check (ot_hours >= 0),
   ot_status text not null default 'pending' check (ot_status in ('pending', 'approved', 'rejected')),
   primary key (employee_id, work_date)
 );
+
+create or replace function public.attendance_flag_rest_day()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_rest smallint;
+begin
+  if new.punch_type is distinct from 'clock_in' then
+    return new;
+  end if;
+  select e.rest_day into v_rest from public.employees e where e.id = new.employee_id;
+  if v_rest is not null and extract(dow from new.work_date)::integer = v_rest then
+    insert into public.attendance_days (employee_id, work_date, rest_day_work)
+    values (new.employee_id, new.work_date, true)
+    on conflict (employee_id, work_date) do update
+      set rest_day_work = true;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists attendance_punches_rest_day on public.attendance_punches;
+create trigger attendance_punches_rest_day
+  after insert on public.attendance_punches
+  for each row execute function public.attendance_flag_rest_day();
 
 create table if not exists public.attendance_audit (
   id uuid primary key default gen_random_uuid(),
@@ -4397,22 +4426,30 @@ security definer
 set search_path = public
 as $$
 declare
-  run_id uuid;
-  emp record;
-  dayrec record;
-  effect jsonb;
-  pay jsonb;
-  days_present integer;
-  half_days integer;
-  late_penalty numeric;
-  ot_hours numeric;
-  incentive_total numeric;
-  cash_total numeric;
-  other_total numeric;
-  earnings numeric;
-  net_pay numeric;
-  made integer := 0;
-  detail jsonb;
+  v_run_id uuid;
+  v_emp record;
+  v_day date;
+  v_effect jsonb;
+  v_pay jsonb;
+  v_days integer;
+  v_half_days integer;
+  v_late numeric;
+  v_ot numeric;
+  v_incentive numeric;
+  v_cash numeric;
+  v_other numeric;
+  v_earnings numeric;
+  v_net numeric;
+  v_made integer := 0;
+  v_detail jsonb;
+  v_clock timestamptz;
+  v_manual_half boolean;
+  v_rest boolean;
+  v_clock_time time;
+  v_day_half boolean;
+  v_day_penalty numeric;
+  v_present boolean;
+  v_rest_work boolean;
 begin
   if not public.is_payroll() then
     raise exception 'Only payroll or an admin can build a payroll.';
@@ -4431,92 +4468,88 @@ begin
   values (p_start, p_end, 'draft', public.payroll_actor())
   on conflict (cutoff_start, cutoff_end) do update
     set created_by = excluded.created_by
-  returning id into run_id;
+  returning id into v_run_id;
 
-  delete from public.payslips where run_id = build_payroll.run_id;
+  delete from public.payslips p where p.run_id = v_run_id;
 
-  for emp in select * from public.employees where active order by name loop
-    days_present := 0;
-    half_days := 0;
-    late_penalty := 0;
-    detail := '[]'::jsonb;
-    for dayrec in
-      select d::date as work_date
+  for v_emp in select e.* from public.employees e where e.active order by e.name loop
+    v_days := 0;
+    v_half_days := 0;
+    v_late := 0;
+    v_detail := '[]'::jsonb;
+    for v_day in
+      select d::date
       from generate_series(p_start, p_end, interval '1 day') as d
     loop
-      declare
-        clock_in timestamptz;
-        manual_half boolean;
-        rest boolean;
-        clock_time time;
-        day_half boolean;
-        day_penalty numeric;
-        present boolean;
-      begin
-        select punched_at into clock_in
-        from public.attendance_punches
-        where employee_id = emp.id and work_date = dayrec.work_date and punch_type = 'clock_in';
-        select half_day into manual_half
-        from public.attendance_days
-        where employee_id = emp.id and work_date = dayrec.work_date;
-        rest := extract(dow from dayrec.work_date)::integer = emp.rest_day;
-        present := clock_in is not null or coalesce(manual_half, false);
-        if not present then
-          continue;
-        end if;
-        days_present := days_present + 1;
-        clock_time := (clock_in at time zone 'Asia/Manila')::time;
-        effect := public.payroll_day_effect(emp.shift_start, clock_time, rest);
-        day_half := coalesce(manual_half, false) or coalesce((effect ->> 'half_day')::boolean, false);
-        if day_half then
-          half_days := half_days + 1;
-          day_penalty := 0;
-        else
-          day_penalty := coalesce((effect ->> 'late_penalty')::numeric, 0);
-        end if;
-        late_penalty := late_penalty + day_penalty;
-        detail := detail || jsonb_build_array(jsonb_build_object(
-          'date', dayrec.work_date,
-          'late_minutes', coalesce((effect ->> 'late_minutes')::integer, 0),
-          'half_day', day_half,
-          'late_penalty', day_penalty
-        ));
-      end;
+      v_clock := null;
+      v_manual_half := false;
+      v_rest_work := false;
+      select ap.punched_at into v_clock
+      from public.attendance_punches ap
+      where ap.employee_id = v_emp.id and ap.work_date = v_day and ap.punch_type = 'clock_in';
+      select ad.half_day, ad.rest_day_work into v_manual_half, v_rest_work
+      from public.attendance_days ad
+      where ad.employee_id = v_emp.id and ad.work_date = v_day;
+      v_rest := extract(dow from v_day)::integer = v_emp.rest_day;
+      v_rest_work := coalesce(v_rest_work, false) or (v_rest and v_clock is not null);
+      v_present := v_clock is not null or coalesce(v_manual_half, false);
+      if not v_present then
+        continue;
+      end if;
+      v_days := v_days + 1;
+      v_clock_time := (v_clock at time zone 'Asia/Manila')::time;
+      v_effect := public.payroll_day_effect(v_emp.shift_start, v_clock_time, v_rest);
+      v_day_half := coalesce(v_manual_half, false) or coalesce((v_effect ->> 'half_day')::boolean, false);
+      if v_day_half then
+        v_half_days := v_half_days + 1;
+        v_day_penalty := 0;
+      else
+        v_day_penalty := coalesce((v_effect ->> 'late_penalty')::numeric, 0);
+      end if;
+      v_late := v_late + v_day_penalty;
+      v_detail := v_detail || jsonb_build_array(jsonb_build_object(
+        'date', v_day,
+        'late_minutes', coalesce((v_effect ->> 'late_minutes')::integer, 0),
+        'half_day', v_day_half,
+        'late_penalty', v_day_penalty,
+        'rest_day_work', v_rest_work
+      ));
     end loop;
 
-    select coalesce(sum(ot_hours), 0) into ot_hours
-    from public.attendance_days
-    where employee_id = emp.id and work_date between p_start and p_end and ot_status = 'approved';
-    select coalesce(sum(amount), 0) into incentive_total
-    from public.incentives
-    where employee_id = emp.id and incentive_date between p_start and p_end;
-    select coalesce(sum(amount), 0) into cash_total
-    from public.cash_advances
-    where employee_id = emp.id and advance_date between p_start and p_end;
-    select coalesce(sum(amount), 0) into other_total
+    select coalesce(sum(ad.ot_hours), 0) into v_ot
+    from public.attendance_days ad
+    where ad.employee_id = v_emp.id and ad.work_date between p_start and p_end and ad.ot_status = 'approved';
+    select coalesce(sum(i.amount), 0) into v_incentive
+    from public.incentives i
+    where i.employee_id = v_emp.id and i.incentive_date between p_start and p_end;
+    select coalesce(sum(ca.amount), 0) into v_cash
+    from public.cash_advances ca
+    where ca.employee_id = v_emp.id and ca.advance_date between p_start and p_end;
+    select coalesce(sum(x.amount), 0) into v_other
     from (
-      select amount from public.violations
-      where employee_id = emp.id and violation_date between p_start and p_end
+      select v.amount from public.violations v
+      where v.employee_id = v_emp.id and v.violation_date between p_start and p_end
       union all
-      select amount from public.payroll_gas
-      where employee_id = emp.id and gas_date between p_start and p_end and deduct
+      select g.amount from public.payroll_gas g
+      where g.employee_id = v_emp.id and g.gas_date between p_start and p_end and g.deduct
     ) x;
 
-    pay := public.payroll_earnings(emp.rate_type, emp.monthly_rate, days_present, half_days, ot_hours, incentive_total);
-    earnings := (pay ->> 'earnings')::numeric;
-    net_pay := round(earnings - late_penalty - cash_total - other_total, 2);
+    -- Fixed staff still pay the late penalty below. Their base is monthly/2.
+    v_pay := public.payroll_earnings(v_emp.rate_type, v_emp.monthly_rate, v_days, v_half_days, v_ot, v_incentive);
+    v_earnings := (v_pay ->> 'earnings')::numeric;
+    v_net := round(v_earnings - v_late - v_cash - v_other, 2);
     insert into public.payslips (
       run_id, employee_id, rate_type, monthly_rate, daily_rate, days_present, half_days,
       ot_hours, ot_pay, incentives, earnings, late_penalty, cash_advance, other_deductions, net_pay, detail
     ) values (
-      run_id, emp.id, emp.rate_type, emp.monthly_rate, (pay ->> 'daily_rate')::numeric,
-      days_present, half_days, ot_hours, (pay ->> 'ot_pay')::numeric, incentive_total,
-      earnings, late_penalty, cash_total, other_total, net_pay, detail
+      v_run_id, v_emp.id, v_emp.rate_type, v_emp.monthly_rate, (v_pay ->> 'daily_rate')::numeric,
+      v_days, v_half_days, v_ot, (v_pay ->> 'ot_pay')::numeric, v_incentive,
+      v_earnings, v_late, v_cash, v_other, v_net, v_detail
     );
-    made := made + 1;
+    v_made := v_made + 1;
   end loop;
 
-  return json_build_object('ok', true, 'run_id', run_id, 'payslips', made);
+  return json_build_object('ok', true, 'run_id', v_run_id, 'payslips', v_made);
 end;
 $$;
 
@@ -4530,9 +4563,26 @@ begin
   if not public.is_admin() then
     raise exception 'Only an admin can lock a payroll.';
   end if;
-  update public.payroll_runs
+  update public.payroll_runs r
   set status = 'locked', locked_by = public.payroll_actor(), locked_at = now()
-  where id = p_run and status = 'draft';
+  where r.id = p_run and r.status = 'draft';
+  return json_build_object('ok', true);
+end;
+$$;
+
+create or replace function public.unlock_payroll(p_run uuid)
+returns json
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only an admin can unlock a payroll.';
+  end if;
+  update public.payroll_runs r
+  set status = 'draft', locked_by = null, locked_at = null
+  where r.id = p_run and r.status = 'locked';
   return json_build_object('ok', true);
 end;
 $$;
@@ -4555,7 +4605,7 @@ security definer
 set search_path = public
 as $$
 declare
-  new_id uuid;
+  v_new_id uuid;
 begin
   if not public.is_payroll() then
     raise exception 'Only payroll or an admin can save an employee.';
@@ -4567,9 +4617,9 @@ begin
     insert into public.employees (name, position, rate_type, monthly_rate, shift_start, shift_end, rest_day, staff_id, active)
     values (btrim(p_name), nullif(btrim(p_position), ''), p_rate_type, coalesce(p_monthly, 0),
       coalesce(p_shift_start, time '09:00'), coalesce(p_shift_end, time '18:00'), coalesce(p_rest, 0), p_staff, coalesce(p_active, true))
-    returning id into new_id;
+    returning id into v_new_id;
   else
-    update public.employees
+    update public.employees e
     set name = btrim(p_name),
         position = nullif(btrim(p_position), ''),
         rate_type = p_rate_type,
@@ -4579,10 +4629,10 @@ begin
         rest_day = coalesce(p_rest, 0),
         staff_id = p_staff,
         active = coalesce(p_active, true)
-    where id = p_id
-    returning id into new_id;
+    where e.id = p_id
+    returning e.id into v_new_id;
   end if;
-  return json_build_object('ok', true, 'id', new_id);
+  return json_build_object('ok', true, 'id', v_new_id);
 end;
 $$;
 
@@ -4780,7 +4830,7 @@ security definer
 set search_path = public
 as $$
 declare
-  status text := 'pending';
+  v_ot_status text := 'pending';
 begin
   if not public.is_payroll() then
     raise exception 'Only payroll or an admin can update the day.';
@@ -4789,17 +4839,17 @@ begin
     raise exception 'Only an admin can approve overtime.';
   end if;
   if coalesce(p_approve, false) then
-    status := 'approved';
+    v_ot_status := 'approved';
   elsif coalesce(p_ot_hours, 0) = 0 then
-    status := 'pending';
+    v_ot_status := 'pending';
   end if;
   insert into public.attendance_days (employee_id, work_date, half_day, half_reason, ot_hours, ot_status)
-  values (p_employee, p_date, coalesce(p_half, false), nullif(btrim(p_half_reason), ''), coalesce(p_ot_hours, 0), status)
+  values (p_employee, p_date, coalesce(p_half, false), nullif(btrim(p_half_reason), ''), coalesce(p_ot_hours, 0), v_ot_status)
   on conflict (employee_id, work_date) do update
     set half_day = excluded.half_day,
         half_reason = excluded.half_reason,
         ot_hours = excluded.ot_hours,
-        ot_status = case when p_approve then 'approved' else public.attendance_days.ot_status end;
+        ot_status = case when p_approve then 'approved' else attendance_days.ot_status end;
   insert into public.attendance_audit (employee_id, action, reason, actor, detail)
   values (p_employee, 'day_update', nullif(btrim(p_half_reason), ''), public.payroll_actor(),
     jsonb_build_object('date', p_date, 'half_day', coalesce(p_half, false), 'ot_hours', coalesce(p_ot_hours, 0), 'approved', coalesce(p_approve, false)));
@@ -4846,8 +4896,27 @@ begin
 end;
 $$;
 
+create or replace function public.employee_id_for_caller()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select e.id
+  from public.employees e
+  join public.staff s on s.id = e.staff_id
+  where lower(s.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+    and s.active
+    and e.active
+  limit 1;
+$$;
+
 -- ---------------------------------------------------------------------------
 -- RLS
+-- Payroll admins can read the run, punches, days, and kiosk list.
+-- They cannot write those tables directly. Writes go through RPCs.
+-- An employee linked to staff can read only their own DTR and payslips.
 -- ---------------------------------------------------------------------------
 
 alter table public.employees enable row level security;
@@ -4897,8 +4966,8 @@ declare
   tbl text;
 begin
   foreach tbl in array array[
-    'employees', 'employee_faces', 'kiosk_devices', 'attendance_punches', 'attendance_days',
-    'cash_advances', 'incentives', 'payroll_gas', 'violations', 'payroll_runs'
+    'employees', 'employee_faces',
+    'cash_advances', 'incentives', 'payroll_gas', 'violations'
   ]
   loop
     if not exists (
@@ -4921,6 +4990,41 @@ begin
   end if;
   if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'payslips' and policyname = 'payslips_payroll_read') then
     create policy payslips_payroll_read on public.payslips
+      for select to authenticated using (public.is_payroll() or employee_id = public.employee_id_for_caller());
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'employees' and policyname = 'employees_self_read') then
+    create policy employees_self_read on public.employees
+      for select to authenticated using (id = public.employee_id_for_caller());
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'attendance_punches' and policyname = 'attendance_punches_read') then
+    create policy attendance_punches_read on public.attendance_punches
+      for select to authenticated using (public.is_payroll() or employee_id = public.employee_id_for_caller());
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'attendance_days' and policyname = 'attendance_days_read') then
+    create policy attendance_days_read on public.attendance_days
+      for select to authenticated using (public.is_payroll() or employee_id = public.employee_id_for_caller());
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'attendance_photos' and policyname = 'attendance_photos_self_read') then
+    create policy attendance_photos_self_read on public.attendance_photos
+      for select to authenticated using (
+        exists (
+          select 1 from public.attendance_punches ap
+          where ap.id = punch_id and ap.employee_id = public.employee_id_for_caller()
+        )
+      );
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'payroll_runs' and policyname = 'payroll_runs_read') then
+    create policy payroll_runs_read on public.payroll_runs
+      for select to authenticated using (
+        public.is_payroll()
+        or exists (
+          select 1 from public.payslips ps
+          where ps.run_id = payroll_runs.id and ps.employee_id = public.employee_id_for_caller()
+        )
+      );
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'kiosk_devices' and policyname = 'kiosk_devices_read') then
+    create policy kiosk_devices_read on public.kiosk_devices
       for select to authenticated using (public.is_payroll());
   end if;
 end $$;
@@ -4961,6 +5065,8 @@ end $$;
 
 revoke execute on function
   public.payroll_actor(),
+  public.employee_id_for_caller(),
+  public.attendance_flag_rest_day(),
   public.kiosk_device_id(text),
   public.payroll_day_effect(time, time, boolean),
   public.payroll_cutoff(date),
@@ -4971,6 +5077,7 @@ revoke execute on function
   public.is_payroll(),
   public.build_payroll(date, date),
   public.lock_payroll(uuid),
+  public.unlock_payroll(uuid),
   public.save_employee(uuid, text, text, text, numeric, time, time, smallint, uuid, boolean),
   public.enroll_employee_face(uuid, numeric[]),
   public.register_kiosk_device(text),
@@ -4986,7 +5093,9 @@ grant execute on function public.payroll_day_effect(time, time, boolean) to auth
 grant execute on function public.payroll_cutoff(date) to authenticated;
 grant execute on function public.payroll_earnings(text, numeric, integer, integer, numeric, numeric) to authenticated;
 grant execute on function public.build_payroll(date, date) to authenticated;
+grant execute on function public.employee_id_for_caller() to authenticated;
 grant execute on function public.lock_payroll(uuid) to authenticated;
+grant execute on function public.unlock_payroll(uuid) to authenticated;
 grant execute on function public.save_employee(uuid, text, text, text, numeric, time, time, smallint, uuid, boolean) to authenticated;
 grant execute on function public.enroll_employee_face(uuid, numeric[]) to authenticated;
 grant execute on function public.register_kiosk_device(text) to authenticated;

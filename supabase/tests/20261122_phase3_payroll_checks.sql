@@ -27,4 +27,29 @@ select round(
 select cutoff_start, cutoff_end from public.payroll_cutoff(date '2026-11-10');
 select cutoff_start, cutoff_end from public.payroll_cutoff(date '2026-11-20');
 
+insert into public.admins (email)
+values ('fiberbropayatas@gmail.com')
+on conflict (email) do nothing;
+
+select set_config('request.jwt.claims', '{"email":"fiberbropayatas@gmail.com"}', true);
+select set_config('request.jwt.claim.email', 'fiberbropayatas@gmail.com', true);
+
+insert into public.employees (name, rate_type, monthly_rate, shift_start, shift_end, rest_day)
+values ('Payroll Check', 'regular', 26000, time '09:00', time '18:00', 0);
+
+insert into public.attendance_punches (employee_id, work_date, punch_type, punched_at, source, reason, entered_by)
+select id, date '2026-11-01', 'clock_in', timestamptz '2026-11-01 09:20+08', 'manual', 'Rest day test', 'test'
+from public.employees where name = 'Payroll Check';
+
+insert into public.attendance_punches (employee_id, work_date, punch_type, punched_at, source, reason, entered_by)
+select id, date '2026-11-02', 'clock_in', timestamptz '2026-11-02 09:20+08', 'manual', 'Late test', 'test'
+from public.employees where name = 'Payroll Check';
+
+select public.build_payroll(date '2026-11-01', date '2026-11-15');
+
+select ps.days_present, ps.late_penalty, ps.net_pay, ps.detail
+from public.payslips ps
+join public.employees e on e.id = ps.employee_id
+where e.name = 'Payroll Check';
+
 rollback;

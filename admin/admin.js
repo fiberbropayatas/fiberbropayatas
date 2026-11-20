@@ -3735,7 +3735,7 @@
               "<td><button type=\"button\" class=\"btn secondary\" data-print=\"" + row.id + "\">PDF</button></td></tr>";
           }).join("");
           document.getElementById("pay-out").innerHTML = "<p>Status: " + esc(run.status) + "</p>" +
-            (run.status === "draft" ? "<button type=\"button\" class=\"btn\" id=\"pay-lock\">Lock cut-off</button>" : "") +
+            (run.status === "draft" ? "<button type=\"button\" class=\"btn\" id=\"pay-lock\">Lock cut-off</button>" : "<button type=\"button\" class=\"btn secondary\" id=\"pay-unlock\">Unlock</button>") +
             "<div class=\"table-wrap\"><table><thead><tr><th>Employee</th><th>Rate</th><th>Days</th><th>Half</th><th>Earnings</th><th>Late</th><th>Net</th><th></th></tr></thead><tbody>" +
             (body || "<tr><td colspan=\"8\">No payslips.</td></tr>") + "</tbody></table></div>";
           var lock = document.getElementById("pay-lock");
@@ -3743,6 +3743,14 @@
             db.rpc("lock_payroll", { p_run: run.id }).then(function (saved) {
               if (saved.error) return flash(errText(saved.error));
               flash("Locked.", true);
+              load(start, end);
+            });
+          };
+          var unlock = document.getElementById("pay-unlock");
+          if (unlock) unlock.onclick = function () {
+            db.rpc("unlock_payroll", { p_run: run.id }).then(function (saved) {
+              if (saved.error) return flash(errText(saved.error));
+              flash("Unlocked.", true);
               load(start, end);
             });
           };
@@ -3803,6 +3811,32 @@
   }
 
   var bootedFor = "";
+  var selfEmployee = null;
+  function renderMyPay() {
+    setChrome("guest");
+    if (pageTitle) pageTitle.textContent = "My pay";
+    var person = selfEmployee || {};
+    Promise.all([
+      db.from("attendance_punches").select("work_date, punch_type, punched_at, source").eq("employee_id", person.id).order("work_date", { ascending: false }).limit(40),
+      db.from("attendance_days").select("work_date, half_day, rest_day_work, ot_hours, ot_status").eq("employee_id", person.id).order("work_date", { ascending: false }).limit(40),
+      db.from("payslips").select("net_pay, earnings, late_penalty, days_present, half_days, run_id, payroll_runs(cutoff_start, cutoff_end, status)").eq("employee_id", person.id)
+    ]).then(function (parts) {
+      var punches = parts[0].error ? [] : (parts[0].data || []);
+      var days = parts[1].error ? [] : (parts[1].data || []);
+      var slips = parts[2].error ? [] : (parts[2].data || []);
+      app.innerHTML = "<section class=\"panel\"><h1>" + esc(person.name || "My pay") + "</h1><p class=\"muted\">Your DTR and payslips only.</p></section>" +
+        "<section class=\"panel\"><h2>DTR</h2>" + punches.map(function (row) {
+          return "<p>" + esc(row.work_date) + " · " + esc(row.punch_type) + " · " + esc(manilaTime(row.punched_at)) + "</p>";
+        }).join("") + (punches.length ? "" : "<p>No punches yet.</p>") +
+        days.filter(function (row) { return row.rest_day_work; }).map(function (row) {
+          return "<p class=\"muted\">Rest day work " + esc(row.work_date) + " — for admin review.</p>";
+        }).join("") + "</section>" +
+        "<section class=\"panel\"><h2>Payslips</h2>" + slips.map(function (row) {
+          var run = row.payroll_runs || {};
+          return "<p>" + esc(run.cutoff_start || "") + " to " + esc(run.cutoff_end || "") + " · " + esc(run.status || "") + " · net " + esc(money(row.net_pay)) + "</p>";
+        }).join("") + (slips.length ? "" : "<p>No payslip yet.</p>") + "</section>";
+    });
+  }
   function boot(email) {
     sessionEmail = email || "";
     if (!sessionEmail || bootedFor === sessionEmail.toLowerCase()) return;
@@ -3816,7 +3850,17 @@
         app.innerHTML = "<section class=\"panel\"><h1>Could not open the admin list</h1><p>" + esc(errText(result.error)) + "</p><p class=\"muted\">Run supabase/schema.sql in the Supabase SQL editor, then reload.</p></section>";
         return;
       }
-      if (!result.data) return renderDenied();
+      if (!result.data) {
+        db.from("employees").select("id, name").limit(1).then(function (mine) {
+          if (mine.data && mine.data[0]) {
+            selfEmployee = mine.data[0];
+            renderMyPay();
+            return;
+          }
+          renderDenied();
+        });
+        return;
+      }
       refresh().then(render).catch(function (error) {
         shell("<section class=\"panel\"><h1>Could not load records</h1><p>" + esc(errText(error)) + "</p></section>");
       });
@@ -3825,6 +3869,7 @@
 
   window.addEventListener("hashchange", function () {
     setNavOpen(false);
+    if (selfEmployee) return renderMyPay();
     if (sessionEmail) render();
   });
 
