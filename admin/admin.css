@@ -492,6 +492,17 @@ tr:last-child td { border-bottom: 0; }
 .legend-item { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; font-weight: 600; color: var(--gray-dark); text-transform: capitalize; }
 .legend-item i { width: 0.7rem; height: 0.7rem; border-radius: 999px; display: inline-block; }
 .ops-map { height: min(70vh, 560px); width: 100%; border-radius: 14px; border: 1px solid var(--line); }
+.nap-badge { background: transparent; border: 0; }
+.nap-badge span {
+  display: inline-block;
+  background: #1a1014;
+  color: #fff;
+  border: 1px solid #B87333;
+  border-radius: 999px;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
 .mini-map { height: 240px; width: 100%; border-radius: 14px; border: 1px solid var(--line); margin-bottom: 0.8rem; }
 .leaflet-top, .leaflet-bottom { z-index: 5; }
 .kanban-col {
