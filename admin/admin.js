@@ -539,7 +539,7 @@
     setChrome("guest");
     if (who) who.innerHTML = "";
     if (pageTitle) pageTitle.textContent = "Sign in";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261119c\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261119c\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261120b\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261120b\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -840,6 +840,8 @@
         : "<div class=\"grid two\">" + section.fields.map(function (field) { return inputHtml(field, customer); }).join("") + "</div>";
       if (section.title === "Location and Network") {
         body += "<p><button type=\"button\" class=\"btn secondary\" id=\"pick-map\">Pick on map</button></p><div id=\"customer-mini-map\" class=\"mini-map\"></div>";
+        body += "<div class=\"grid two\"><div class=\"field\"><label for=\"f-lp_id\">LP record</label><select id=\"f-lp_id\" data-key=\"lp_id\" data-type=\"text\"><option value=\"\">Not linked</option></select><span class=\"muted\">Text LP above is kept.</span></div>" +
+          "<div class=\"field\"><label for=\"f-nap_id\">NAP record</label><select id=\"f-nap_id\" data-key=\"nap_id\" data-type=\"text\"><option value=\"\">Not linked</option></select><span class=\"muted\">Text NAP and port above are kept.</span></div></div>";
       }
       return formCard(section.title, body);
     }).join("");
@@ -918,6 +920,7 @@
     if (pppoeInput && generatedPppoe && pppoeInput.value.trim().toUpperCase() === generatedPppoe) lastAutoPppoe = generatedPppoe;
     if (!isNew && customer.valid_id_path) loadValidIdPhoto(customer.valid_id_path);
     initCustomerMiniMap();
+    wireLpNap(customer);
     wireQuickBill(customer);
     wirePortalAccess(customer);
     wireHistory();
@@ -1979,10 +1982,51 @@
     });
   }
 
+  function customerPinColor(row, openBills) {
+    if (row.for_disconnection) return "#9AA0A6";
+    if (row.stage === "inquiry" || row.stage === "in_progress" || row.stage === "encoded") return "#B87333";
+    var bills = openBills[row.id] || [];
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var overdue = bills.some(function (bill) {
+      return bill.due_date && new Date(String(bill.due_date).slice(0, 10) + "T00:00:00") < today;
+    });
+    if (overdue) return "#FF0000";
+    if (bills.length) return "#E07A3D";
+    if (row.stage === "active") return "#2E7D32";
+    return "#6B6F76";
+  }
+
+  function pinStatus(row, openBills) {
+    if (row.for_disconnection) return "Disconnected";
+    if (row.stage !== "active") return stageLabel(row.stage);
+    var bills = openBills[row.id] || [];
+    if (!bills.length) return "Active / paid";
+    return "Unpaid";
+  }
+
   function renderMap() {
     var gen = viewGen;
-    shell("<section class=\"panel\"><h1>Network map</h1><div id=\"ops-map\" class=\"ops-map\"></div>" +
+    shell("<section class=\"panel\"><h1>Network map</h1>" +
+      "<div class=\"filters\">" +
+      "<select id=\"map-area\"><option value=\"\">All areas</option></select>" +
+      "<select id=\"map-investor\"><option value=\"\">All investors</option></select>" +
+      "<select id=\"map-lp\"><option value=\"\">All LPs</option></select>" +
+      "<select id=\"map-nap\"><option value=\"\">All NAPs</option></select>" +
+      "<label class=\"field check\"><input id=\"layer-lp\" type=\"checkbox\" checked> LP to NAP</label>" +
+      "<label class=\"field check\"><input id=\"layer-cust\" type=\"checkbox\" checked> NAP to customer</label>" +
+      "<label class=\"field check\"><input id=\"layer-areas\" type=\"checkbox\" checked> Areas</label>" +
+      "</div>" +
+      "<div id=\"ops-map\" class=\"ops-map\"></div>" +
       "<div class=\"legend\" id=\"map-legend\"></div>" +
+      "<p id=\"map-note\" class=\"muted\"></p>" +
+      "<div class=\"actions\">" +
+      "<button type=\"button\" class=\"btn secondary\" id=\"add-node\">Add node</button>" +
+      "<button type=\"button\" class=\"btn secondary\" id=\"add-lp\">Add LP</button>" +
+      "<button type=\"button\" class=\"btn secondary\" id=\"add-nap\">Add NAP</button>" +
+      "<button type=\"button\" class=\"btn secondary\" id=\"draw-area\">Draw area</button>" +
+      "<button type=\"button\" class=\"btn secondary\" id=\"use-location\">Use my current location</button>" +
+      "</div>" +
       "<form id=\"node-form\" class=\"grid two\" hidden>" +
       "<input type=\"hidden\" id=\"node-id\"><input type=\"hidden\" id=\"node-lat\"><input type=\"hidden\" id=\"node-lng\">" +
       "<div class=\"field\"><label>Type</label><select id=\"node-type\"><option>OLT</option><option>LCP</option><option>NAP</option><option>CLOSURE</option><option>POLE</option><option>OTHER</option></select></div>" +
@@ -1990,48 +2034,168 @@
       "<div class=\"field\"><label>Ports</label><input id=\"node-ports\" type=\"number\" min=\"0\" step=\"1\"></div>" +
       "<div class=\"field\"><label>Notes</label><input id=\"node-notes\"></div>" +
       "<div class=\"actions\"><button class=\"btn\" type=\"submit\">Save node</button><button class=\"btn secondary\" type=\"button\" id=\"node-cancel\">Cancel</button></div></form>" +
-      "<p><button type=\"button\" class=\"btn secondary\" id=\"add-node\">Add node</button></p>" +
-      "<div id=\"node-list\"></div></section>");
+      "<form id=\"lp-form\" class=\"grid two\" hidden>" +
+      "<input type=\"hidden\" id=\"lp-id\"><input type=\"hidden\" id=\"lp-lat\"><input type=\"hidden\" id=\"lp-lng\">" +
+      "<div class=\"field\"><label for=\"lp-code\">Code</label><input id=\"lp-code\" required></div>" +
+      "<div class=\"field\"><label for=\"lp-name\">Name</label><input id=\"lp-name\" required></div>" +
+      "<div class=\"field\"><label for=\"lp-area\">Area</label><input id=\"lp-area\"></div>" +
+      "<div class=\"field\"><label for=\"lp-sub\">Sub area</label><input id=\"lp-sub\"></div>" +
+      "<div class=\"field\"><label for=\"lp-ports\">Port capacity</label><input id=\"lp-ports\" type=\"number\" min=\"0\" step=\"1\"></div>" +
+      "<div class=\"field\"><label for=\"lp-notes\">Notes</label><input id=\"lp-notes\"></div>" +
+      "<div class=\"field\"><label for=\"lp-photo\">Photo</label><input id=\"lp-photo\" type=\"file\" accept=\"image/jpeg,image/png,image/webp\"></div>" +
+      "<div class=\"actions\"><button class=\"btn\" type=\"submit\">Save LP</button><button class=\"btn secondary\" type=\"button\" id=\"lp-cancel\">Cancel</button></div></form>" +
+      "<form id=\"nap-form\" class=\"grid two\" hidden>" +
+      "<input type=\"hidden\" id=\"nap-id\"><input type=\"hidden\" id=\"nap-lat\"><input type=\"hidden\" id=\"nap-lng\">" +
+      "<div class=\"field\"><label for=\"nap-lp\">Parent LP</label><select id=\"nap-lp\"></select></div>" +
+      "<div class=\"field\"><label for=\"nap-code\">Code</label><input id=\"nap-code\" required></div>" +
+      "<div class=\"field\"><label for=\"nap-name\">Name</label><input id=\"nap-name\" required></div>" +
+      "<div class=\"field\"><label for=\"nap-area\">Area</label><input id=\"nap-area\"></div>" +
+      "<div class=\"field\"><label for=\"nap-sub\">Sub area</label><input id=\"nap-sub\"></div>" +
+      "<div class=\"field\"><label for=\"nap-ports\">Port capacity</label><input id=\"nap-ports\" type=\"number\" min=\"1\" step=\"1\" value=\"8\"></div>" +
+      "<div class=\"field\"><label for=\"nap-notes\">Notes</label><input id=\"nap-notes\"></div>" +
+      "<div class=\"field\"><label for=\"nap-photo\">Photo</label><input id=\"nap-photo\" type=\"file\" accept=\"image/jpeg,image/png,image/webp\"></div>" +
+      "<div class=\"actions\"><button class=\"btn\" type=\"submit\">Save NAP</button><button class=\"btn secondary\" type=\"button\" id=\"nap-cancel\">Cancel</button></div></form>" +
+      "<form id=\"area-form\" class=\"grid\" hidden>" +
+      "<p class=\"muted\" id=\"area-count\">Click the map to add corners.</p>" +
+      "<div class=\"field\"><label for=\"area-name\">Area name</label><input id=\"area-name\" required></div>" +
+      "<div class=\"actions\"><button class=\"btn\" type=\"submit\">Save area</button><button class=\"btn secondary\" type=\"button\" id=\"area-cancel\">Cancel</button></div></form>" +
+      "<div id=\"node-list\"></div><div id=\"full-naps\"></div></section>");
     if (!window.L) {
       flash("Map library did not load.");
       return;
     }
     var map = L.map("ops-map").setView([14.711, 121.110], 14);
     osmTiles().addTo(map);
-    var adding = false;
-    var editing = null;
-    document.getElementById("add-node").onclick = function () {
-      adding = true;
-      this.textContent = "Click the map…";
+    var adding = "";
+    var areaPoints = [];
+    var areaLine = null;
+    document.getElementById("add-node").onclick = function () { adding = "node"; this.textContent = "Click the map…"; };
+    document.getElementById("add-lp").onclick = function () { adding = "lp"; this.textContent = "Click the map…"; };
+    document.getElementById("add-nap").onclick = function () { adding = "nap"; this.textContent = "Click the map…"; };
+    document.getElementById("draw-area").onclick = function () {
+      adding = "area";
+      areaPoints = [];
+      document.getElementById("area-form").hidden = false;
+      document.getElementById("area-count").textContent = "Click the map to add corners.";
     };
-    document.getElementById("node-cancel").onclick = function () {
-      document.getElementById("node-form").hidden = true;
-      adding = false;
+    document.getElementById("node-cancel").onclick = function () { document.getElementById("node-form").hidden = true; adding = ""; };
+    document.getElementById("lp-cancel").onclick = function () { document.getElementById("lp-form").hidden = true; adding = ""; };
+    document.getElementById("nap-cancel").onclick = function () { document.getElementById("nap-form").hidden = true; adding = ""; };
+    document.getElementById("area-cancel").onclick = function () {
+      document.getElementById("area-form").hidden = true;
+      adding = "";
+      if (areaLine) map.removeLayer(areaLine);
+    };
+    document.getElementById("use-location").onclick = function () {
+      if (!navigator.geolocation) return flash("This browser has no location.");
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        var lat = pos.coords.latitude;
+        var lng = pos.coords.longitude;
+        ["node", "lp", "nap"].forEach(function (prefix) {
+          var latEl = document.getElementById(prefix + "-lat");
+          var lngEl = document.getElementById(prefix + "-lng");
+          if (latEl && !document.getElementById(prefix + "-form").hidden) {
+            latEl.value = lat;
+            lngEl.value = lng;
+          }
+        });
+        map.setView([lat, lng], 17);
+        flash("Location set on the open form. Open Add LP or Add NAP first if none is open.", true);
+      }, function () { flash("Location was blocked."); });
     };
     map.on("click", function (event) {
-      if (!adding) return;
-      document.getElementById("node-id").value = "";
-      document.getElementById("node-lat").value = event.latlng.lat;
-      document.getElementById("node-lng").value = event.latlng.lng;
-      document.getElementById("node-form").hidden = false;
-      adding = false;
-      document.getElementById("add-node").textContent = "Add node";
+      if (adding === "node") {
+        document.getElementById("node-id").value = "";
+        document.getElementById("node-lat").value = event.latlng.lat;
+        document.getElementById("node-lng").value = event.latlng.lng;
+        document.getElementById("node-form").hidden = false;
+        adding = "";
+        document.getElementById("add-node").textContent = "Add node";
+      } else if (adding === "lp") {
+        document.getElementById("lp-id").value = "";
+        document.getElementById("lp-lat").value = event.latlng.lat;
+        document.getElementById("lp-lng").value = event.latlng.lng;
+        document.getElementById("lp-form").hidden = false;
+        adding = "";
+        document.getElementById("add-lp").textContent = "Add LP";
+      } else if (adding === "nap") {
+        document.getElementById("nap-id").value = "";
+        document.getElementById("nap-lat").value = event.latlng.lat;
+        document.getElementById("nap-lng").value = event.latlng.lng;
+        document.getElementById("nap-form").hidden = false;
+        adding = "";
+        document.getElementById("add-nap").textContent = "Add NAP";
+      } else if (adding === "area") {
+        areaPoints.push(event.latlng);
+        if (areaLine) map.removeLayer(areaLine);
+        areaLine = L.polyline(areaPoints, { color: "#B87333" }).addTo(map);
+        document.getElementById("area-count").textContent = areaPoints.length + " corners. Click Save area when the shape is closed enough.";
+      }
     });
+    function quiet(builder) {
+      return builder.then(function (result) { return result.error ? [] : (result.data || []); }).catch(function () { return []; });
+    }
     Promise.all([
       db.from("network_nodes").select("*"),
-      db.from("customers").select("id, name, account_number, stage, latitude, longitude")
+      db.from("customers").select("id, name, account_number, stage, latitude, longitude, area, investor_id, plan, plan_speed, for_disconnection, lp_id, nap_id").then(function (result) {
+        if (!result.error) return result;
+        return db.from("customers").select("id, name, account_number, stage, latitude, longitude, area, investor_id, plan, plan_speed, for_disconnection");
+      }),
+      db.from("invoices").select("customer_id, status, amount, due_date").in("status", ["unpaid", "pending"]),
+      quiet(db.from("distribution_points").select("*")),
+      quiet(db.from("nap_boxes").select("*")),
+      quiet(db.from("area_polygons").select("*"))
     ]).then(function (parts) {
       if (gen !== viewGen) return;
       if (parts[0].error) throw parts[0].error;
       var nodes = parts[0].data || [];
-      var legend = "";
-      Object.keys(NODE_COLORS).forEach(function (type) {
-        legend += "<span class=\"legend-item\"><i style=\"background:" + NODE_COLORS[type] + "\"></i>" + type + "</span>";
+      var customers = parts[1].error ? [] : (parts[1].data || []);
+      var invoices = parts[2].error ? [] : (parts[2].data || []);
+      var lps = parts[3] || [];
+      var naps = parts[4] || [];
+      var areas = parts[5] || [];
+      if (!lps.length && !naps.length) document.getElementById("map-note").textContent = "LP and NAP tables appear after supabase/migrations/20261120_network_map.sql is applied. Existing nodes and customer pins still show.";
+      var openBills = {};
+      invoices.forEach(function (bill) {
+        if (!openBills[bill.customer_id]) openBills[bill.customer_id] = [];
+        openBills[bill.customer_id].push(bill);
       });
-      STAGES.forEach(function (stage) {
-        legend += "<span class=\"legend-item\"><i style=\"background:" + (STAGE_COLORS[stage.id] || "#6B6F76") + "\"></i>" + esc(stage.label) + "</span>";
+      var used = {};
+      customers.forEach(function (row) { if (row.nap_id) used[row.nap_id] = (used[row.nap_id] || 0) + 1; });
+      var areaNames = [];
+      customers.forEach(function (row) { if (row.area && areaNames.indexOf(row.area) === -1) areaNames.push(row.area); });
+      areas.forEach(function (row) { if (areaNames.indexOf(row.area_name) === -1) areaNames.push(row.area_name); });
+      areaNames.sort();
+      document.getElementById("map-area").innerHTML = "<option value=\"\">All areas</option>" + areaNames.map(function (name) {
+        var count = customers.filter(function (row) { return row.area === name; }).length;
+        return "<option value=\"" + esc(name) + "\">" + esc(name) + " (" + count + ")</option>";
+      }).join("");
+      document.getElementById("map-investor").innerHTML = "<option value=\"\">All investors</option>" + state.investors.map(function (inv) {
+        return "<option value=\"" + inv.id + "\">" + esc(investorLabel(inv)) + "</option>";
+      }).join("");
+      document.getElementById("map-lp").innerHTML = "<option value=\"\">All LPs</option>" + lps.map(function (row) {
+        return "<option value=\"" + row.id + "\">" + esc(row.code + " · " + row.name) + "</option>";
+      }).join("");
+      document.getElementById("map-nap").innerHTML = "<option value=\"\">All NAPs</option>" + naps.map(function (row) {
+        return "<option value=\"" + row.id + "\">" + esc(row.code + " · " + row.name) + "</option>";
+      }).join("");
+      document.getElementById("nap-lp").innerHTML = lps.map(function (row) {
+        return "<option value=\"" + row.id + "\">" + esc(row.code + " · " + row.name) + "</option>";
+      }).join("");
+      var legend = "<span class=\"legend-item\"><i style=\"background:#2E7D32\"></i>Active / paid</span>" +
+        "<span class=\"legend-item\"><i style=\"background:#FF0000\"></i>Unpaid / overdue</span>" +
+        "<span class=\"legend-item\"><i style=\"background:#B87333\"></i>New</span>" +
+        "<span class=\"legend-item\"><i style=\"background:#9AA0A6\"></i>Disconnected</span>";
+      areaNames.forEach(function (name) {
+        var count = customers.filter(function (row) { return row.area === name; }).length;
+        legend += "<span class=\"legend-item\"><i style=\"background:#B87333\"></i>" + esc(name) + " " + count + "</span>";
       });
       document.getElementById("map-legend").innerHTML = legend;
+      var lpLayer = L.layerGroup().addTo(map);
+      var custLineLayer = L.layerGroup().addTo(map);
+      var areaLayer = L.layerGroup().addTo(map);
+      var cluster = L.markerClusterGroup ? L.markerClusterGroup({ chunkedLoading: true, maxClusterRadius: 45 }) : L.layerGroup();
+      map.addLayer(cluster);
       nodes.forEach(function (node) {
         var marker = L.circleMarker([node.latitude, node.longitude], {
           radius: 8, color: NODE_COLORS[node.node_type] || "#111", fillOpacity: 0.9
@@ -2042,7 +2206,6 @@
           var button = document.getElementById("edit-" + node.id);
           if (!button) return;
           button.onclick = function () {
-            editing = node;
             document.getElementById("node-id").value = node.id;
             document.getElementById("node-type").value = node.node_type;
             document.getElementById("node-name").value = node.name;
@@ -2054,39 +2217,110 @@
           };
         });
       });
-      (parts[1].data || []).forEach(function (row) {
-        if (row.latitude == null || row.longitude == null) return;
-        L.circleMarker([row.latitude, row.longitude], {
-          radius: 6, color: STAGE_COLORS[row.stage] || "#6B6F76", fillOpacity: 0.85
-        }).addTo(map).bindPopup("<a href=\"#customer/" + row.id + "\">" + esc(row.name || row.account_number || "Customer") + "</a><br>" + esc(stageLabel(row.stage)));
-      });
-      function fillNodeForm(node) {
-        document.getElementById("node-id").value = node ? node.id : "";
-        document.getElementById("node-type").value = node ? node.node_type : "NAP";
-        document.getElementById("node-name").value = node ? node.name : "";
-        document.getElementById("node-ports").value = node && node.ports != null ? node.ports : "";
-        document.getElementById("node-notes").value = node && node.notes ? node.notes : "";
-        document.getElementById("node-lat").value = node ? node.latitude : "";
-        document.getElementById("node-lng").value = node ? node.longitude : "";
-        document.getElementById("node-form").hidden = false;
+      function draw() {
+        lpLayer.clearLayers();
+        custLineLayer.clearLayers();
+        areaLayer.clearLayers();
+        cluster.clearLayers();
+        var area = document.getElementById("map-area").value;
+        var investor = document.getElementById("map-investor").value;
+        var lpId = document.getElementById("map-lp").value;
+        var napId = document.getElementById("map-nap").value;
+        var visible = customers.filter(function (row) {
+          return (!area || row.area === area) && (!investor || row.investor_id === investor) &&
+            (!lpId || row.lp_id === lpId) && (!napId || row.nap_id === napId);
+        });
+        if (document.getElementById("layer-lp").checked) {
+          naps.forEach(function (nap) {
+            var parent = lps.filter(function (lp) { return lp.id === nap.lp_id; })[0];
+            if (!parent) return;
+            L.polyline([[parent.latitude, parent.longitude], [nap.latitude, nap.longitude]], { color: "#B87333", weight: 2 }).addTo(lpLayer);
+          });
+        }
+        lps.forEach(function (lp) {
+          L.circleMarker([lp.latitude, lp.longitude], { radius: 9, color: "#FF0000", fillColor: "#FF0000", fillOpacity: 0.9 }).addTo(lpLayer)
+            .bindPopup("<strong>LP " + esc(lp.code) + "</strong><br>" + esc(lp.name) + "<br>" + esc(lp.area || ""));
+        });
+        naps.forEach(function (nap) {
+          var count = used[nap.id] || 0;
+          var cap = nap.port_capacity || 0;
+          var badge = L.divIcon({
+            className: "nap-badge",
+            html: "<span>" + count + "/" + (cap || "–") + "</span>",
+            iconSize: [46, 22],
+            iconAnchor: [23, 11]
+          });
+          L.marker([nap.latitude, nap.longitude], { icon: badge }).addTo(lpLayer).bindPopup(
+            "<strong>NAP " + esc(nap.code) + "</strong><br>" + esc(nap.name) + "<br>Ports " + count + "/" + (cap || "—")
+          );
+        });
+        if (document.getElementById("layer-cust").checked) {
+          visible.forEach(function (row) {
+            if (row.latitude == null || row.longitude == null || !row.nap_id) return;
+            var nap = naps.filter(function (item) { return item.id === row.nap_id; })[0];
+            if (!nap) return;
+            L.polyline([[nap.latitude, nap.longitude], [row.latitude, row.longitude]], { color: "#888", weight: 1, dashArray: "4 4" }).addTo(custLineLayer);
+          });
+        }
+        visible.forEach(function (row) {
+          if (row.latitude == null || row.longitude == null) return;
+          var bills = openBillsFor(row.id);
+          var balance = bills.reduce(function (sum, bill) { return sum + Number(bill.amount || 0); }, 0);
+          var color = customerPinColor(row, openBills);
+          var popup = "<strong>" + esc(row.name || "Customer") + "</strong><br>Account " + esc(row.account_number || "—") +
+            "<br>" + esc(row.plan_speed || row.plan || "No plan") + "<br>" + esc(pinStatus(row, openBills)) +
+            "<br>Balance " + esc(money(balance)) +
+            "<br><a href=\"https://www.google.com/maps/search/?api=1&query=" + row.latitude + "," + row.longitude + "\" target=\"_blank\" rel=\"noopener\">Open in Google Maps</a>" +
+            "<br><a href=\"#customer/" + row.id + "\">Open customer record</a>";
+          L.circleMarker([row.latitude, row.longitude], { radius: 6, color: color, fillColor: color, fillOpacity: 0.9 })
+            .bindPopup(popup).addTo(cluster);
+        });
+        if (document.getElementById("layer-areas").checked) {
+          areas.forEach(function (poly) {
+            var path = poly.path || [];
+            if (path.length < 3) return;
+            L.polygon(path.map(function (point) { return [point.lat, point.lng]; }), { color: "#FF0000", weight: 1, fillOpacity: 0.08 }).addTo(areaLayer)
+              .bindPopup(esc(poly.area_name));
+          });
+        }
       }
+      function openBillsFor(id) { return openBills[id] || []; }
+      ["map-area", "map-investor", "map-lp", "map-nap", "layer-lp", "layer-cust", "layer-areas"].forEach(function (id) {
+        document.getElementById(id).addEventListener("change", draw);
+      });
+      draw();
       document.getElementById("node-list").innerHTML = nodes.map(function (node) {
         return "<p>" + esc(node.node_type) + " · " + esc(node.name) +
           " <button type=\"button\" class=\"btn secondary\" data-edit-node=\"" + node.id + "\">Edit</button>" +
           " <button type=\"button\" class=\"btn secondary\" data-del-node=\"" + node.id + "\">Delete</button></p>";
+      }).join("") + lps.map(function (lp) {
+        return "<p>LP " + esc(lp.code) + " · " + esc(lp.name) + " <button type=\"button\" class=\"btn secondary\" data-del-lp=\"" + lp.id + "\">Delete</button></p>";
+      }).join("") + naps.map(function (nap) {
+        return "<p>NAP " + esc(nap.code) + " · " + esc(nap.name) + " <button type=\"button\" class=\"btn secondary\" data-del-nap=\"" + nap.id + "\">Delete</button></p>";
       }).join("");
-      app.querySelectorAll("[data-edit-node]").forEach(function (button) {
-        button.onclick = function () {
-          var node = nodes.filter(function (item) { return item.id === button.getAttribute("data-edit-node"); })[0];
-          if (node) {
-            fillNodeForm(node);
-            map.panTo([node.latitude, node.longitude]);
-          }
-        };
-      });
+      var full = naps.filter(function (nap) { return nap.port_capacity && (used[nap.id] || 0) >= nap.port_capacity; });
+      document.getElementById("full-naps").innerHTML = "<h2>Full NAPs</h2>" + (full.map(function (nap) {
+        return "<p>" + esc(nap.code) + " · " + (used[nap.id] || 0) + "/" + nap.port_capacity + "</p>";
+      }).join("") || "<p class=\"muted\">No NAP is full.</p>");
       app.querySelectorAll("[data-del-node]").forEach(function (button) {
         button.onclick = function () {
           db.from("network_nodes").delete().eq("id", button.getAttribute("data-del-node")).then(function (del) {
+            if (del.error) return flash(errText(del.error));
+            renderMap();
+          });
+        };
+      });
+      app.querySelectorAll("[data-del-lp]").forEach(function (button) {
+        button.onclick = function () {
+          db.from("distribution_points").delete().eq("id", button.getAttribute("data-del-lp")).then(function (del) {
+            if (del.error) return flash(errText(del.error));
+            renderMap();
+          });
+        };
+      });
+      app.querySelectorAll("[data-del-nap]").forEach(function (button) {
+        button.onclick = function () {
+          db.from("nap_boxes").delete().eq("id", button.getAttribute("data-del-nap")).then(function (del) {
             if (del.error) return flash(errText(del.error));
             renderMap();
           });
@@ -2107,6 +2341,73 @@
       var id = document.getElementById("node-id").value;
       var query = id ? db.from("network_nodes").update(record).eq("id", id) : db.from("network_nodes").insert(record);
       query.then(function (save) {
+        if (save.error) return flash(errText(save.error));
+        renderMap();
+      });
+    };
+    function savePhoto(file) {
+      if (!file) return Promise.resolve(null);
+      var ext = file.type === "image/png" ? "png" : (file.type === "image/webp" ? "webp" : "jpg");
+      var path = "assets/" + Date.now() + "-" + Math.floor(Math.random() * 10000) + "." + ext;
+      return db.storage.from("network-photos").upload(path, file, { contentType: file.type || "image/jpeg", upsert: false }).then(function (result) {
+        if (result.error) throw result.error;
+        return path;
+      });
+    }
+    document.getElementById("lp-form").onsubmit = function (event) {
+      event.preventDefault();
+      var file = document.getElementById("lp-photo").files[0];
+      savePhoto(file).then(function (path) {
+        var record = {
+          code: document.getElementById("lp-code").value.trim(),
+          name: document.getElementById("lp-name").value.trim(),
+          area: document.getElementById("lp-area").value.trim() || null,
+          sub_area: document.getElementById("lp-sub").value.trim() || null,
+          port_capacity: document.getElementById("lp-ports").value === "" ? null : Number(document.getElementById("lp-ports").value),
+          notes: document.getElementById("lp-notes").value.trim() || null,
+          latitude: Number(document.getElementById("lp-lat").value),
+          longitude: Number(document.getElementById("lp-lng").value)
+        };
+        if (path) record.photo_path = path;
+        var id = document.getElementById("lp-id").value;
+        var query = id ? db.from("distribution_points").update(record).eq("id", id) : db.from("distribution_points").insert(record);
+        return query;
+      }).then(function (save) {
+        if (save.error) return flash(errText(save.error));
+        renderMap();
+      }).catch(function (error) { flash(errText(error)); });
+    };
+    document.getElementById("nap-form").onsubmit = function (event) {
+      event.preventDefault();
+      var file = document.getElementById("nap-photo").files[0];
+      savePhoto(file).then(function (path) {
+        var record = {
+          lp_id: document.getElementById("nap-lp").value || null,
+          code: document.getElementById("nap-code").value.trim(),
+          name: document.getElementById("nap-name").value.trim(),
+          area: document.getElementById("nap-area").value.trim() || null,
+          sub_area: document.getElementById("nap-sub").value.trim() || null,
+          port_capacity: document.getElementById("nap-ports").value === "" ? null : Number(document.getElementById("nap-ports").value),
+          notes: document.getElementById("nap-notes").value.trim() || null,
+          latitude: Number(document.getElementById("nap-lat").value),
+          longitude: Number(document.getElementById("nap-lng").value)
+        };
+        if (path) record.photo_path = path;
+        var id = document.getElementById("nap-id").value;
+        var query = id ? db.from("nap_boxes").update(record).eq("id", id) : db.from("nap_boxes").insert(record);
+        return query;
+      }).then(function (save) {
+        if (save.error) return flash(errText(save.error));
+        renderMap();
+      }).catch(function (error) { flash(errText(error)); });
+    };
+    document.getElementById("area-form").onsubmit = function (event) {
+      event.preventDefault();
+      if (areaPoints.length < 3) return flash("Add at least 3 corners.");
+      db.from("area_polygons").insert({
+        area_name: document.getElementById("area-name").value.trim(),
+        path: areaPoints.map(function (point) { return { lat: point.lat, lng: point.lng }; })
+      }).then(function (save) {
         if (save.error) return flash(errText(save.error));
         renderMap();
       });
@@ -2287,6 +2588,38 @@
         loadCustomer(customer.id);
       });
     };
+  }
+
+  function fillSelect(id, rows, selected, labelFn) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var html = "<option value=\"\">Not linked</option>";
+    (rows || []).forEach(function (row) {
+      html += "<option value=\"" + row.id + "\"" + (row.id === selected ? " selected" : "") + ">" + esc(labelFn(row)) + "</option>";
+    });
+    el.innerHTML = html;
+  }
+
+  function wireLpNap(customer) {
+    var lpSelect = document.getElementById("f-lp_id");
+    var napSelect = document.getElementById("f-nap_id");
+    if (!lpSelect || !napSelect || !db) return;
+    Promise.all([
+      db.from("distribution_points").select("id, code, name").order("code"),
+      db.from("nap_boxes").select("id, code, name, lp_id").order("code")
+    ]).then(function (parts) {
+      if (parts[0].error || parts[1].error) return;
+      var lps = parts[0].data || [];
+      var naps = parts[1].data || [];
+      fillSelect("f-lp_id", lps, customer.lp_id, function (row) { return row.code + " · " + row.name; });
+      function refillNaps() {
+        var lpId = document.getElementById("f-lp_id").value;
+        var list = lpId ? naps.filter(function (row) { return row.lp_id === lpId; }) : naps;
+        fillSelect("f-nap_id", list, customer.nap_id, function (row) { return row.code + " · " + row.name; });
+      }
+      document.getElementById("f-lp_id").onchange = refillNaps;
+      refillNaps();
+    }).catch(function () {});
   }
 
   function initCustomerMiniMap() {
