@@ -635,6 +635,14 @@ begin
 end;
 $$;
 
+alter table public.investor_parties enable row level security;
+alter table public.investor_accounts enable row level security;
+alter table public.investor_splits enable row level security;
+alter table public.extra_income enable row level security;
+alter table public.pahabol enable row level security;
+alter table public.investor_personal_expenses enable row level security;
+alter table public.commission_runs enable row level security;
+
 -- Seed. Skipped when an account already has splits, so a later edit is kept.
 do $$
 declare
@@ -674,13 +682,7 @@ begin
   perform set_config('fiberbro.skip_split_check', '0', true);
 end $$;
 
-alter table public.investor_parties enable row level security;
-alter table public.investor_accounts enable row level security;
-alter table public.investor_splits enable row level security;
-alter table public.extra_income enable row level security;
-alter table public.pahabol enable row level security;
-alter table public.investor_personal_expenses enable row level security;
-alter table public.commission_runs enable row level security;
+set constraints all immediate;
 
 revoke all on table public.investor_parties from public, anon;
 revoke all on table public.investor_accounts from public, anon;
