@@ -397,6 +397,8 @@
     ["Network", [
       ["map", "Map", "map"],
       ["investors", "Investors", "investors"],
+      ["accounts", "Account splits", "investors"],
+      ["commission", "Commission", "billing"],
       ["technicians", "Technicians", "technicians"]
     ]],
     ["Payroll", [
@@ -422,6 +424,8 @@
     map: "Map",
     repairs: "Repairs",
     investors: "Investors",
+    accounts: "Account splits",
+    commission: "Commission",
     technicians: "Technicians",
     tickets: "Install tickets",
     ops: "Tickets",
@@ -567,7 +571,7 @@
     setChrome("guest");
     if (who) who.innerHTML = "";
     if (pageTitle) pageTitle.textContent = "Sign in";
-    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261122b\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261122b\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
+    app.innerHTML = "<section class=\"panel sign-panel\"><picture><source type=\"image/webp\" srcset=\"/assets/img/fiberbro-logo.webp?v=20261123b\"><img class=\"sign-logo\" src=\"/assets/img/fiberbro-logo.png?v=20261123b\" width=\"1600\" height=\"501\" alt=\"FiberBro Internet Communication Services Corp.\"></picture><h1>FiberBro admin</h1><p>Sign in with the company Gmail account. Only emails on the admin allowlist can open records.</p><button type=\"button\" class=\"btn\" id=\"sign-in\">Sign in with Google</button></section>";
     document.getElementById("sign-in").onclick = function () {
       db.auth.signInWithOAuth({
         provider: "google",
@@ -3776,6 +3780,179 @@
     if (gen === viewGen) load(range.start, range.end);
   }
 
+  function renderAccounts() {
+    var gen = viewGen;
+    shell("<section class=\"panel\"><h1>Account splits</h1><p class=\"muted\">Loading…</p></section>");
+    db.from("investor_accounts").select("*, investor_splits(party, percent)").order("code").then(function (result) {
+      if (gen !== viewGen) return;
+      if (result.error) return flash("Account splits are not ready. Apply supabase/migrations/20261123_phase4_investors.sql. " + errText(result.error));
+      var rows = result.data || [];
+      var body = rows.map(function (row) {
+        var parts = (row.investor_splits || []).map(function (item) { return item.party + " " + item.percent + "%"; }).join(", ");
+        return "<tr><td>" + esc(row.code) + "</td><td>" + esc(row.label) + "</td><td>" + (row.company ? "Company" : "Split") + "</td><td>" + esc(parts) + "</td>" +
+          "<td><button type=\"button\" class=\"btn secondary\" data-edit=\"" + row.id + "\">Edit</button></td></tr>";
+      }).join("");
+      shell("<section class=\"panel\"><h1>Account splits</h1><p class=\"muted\">MAL and AL are not used. Old codes A, J, AJ, NELSONANN, and Hadj map to ALVIN, JOLLI, AINA, NELSON, and HADJ. Investors sign in at <a href=\"/investor/\">/investor/</a> with staff role investor and a party name.</p>" +
+        "<form id=\"acct-form\" class=\"grid two\">" +
+        "<div class=\"field\"><label>Code</label><input id=\"acct-code\" required></div>" +
+        "<div class=\"field\"><label>Label</label><input id=\"acct-label\"></div>" +
+        "<div class=\"field check\"><input id=\"acct-company\" type=\"checkbox\"><label for=\"acct-company\">100% company</label></div>" +
+        "<div class=\"field\"><label>Splits</label><textarea id=\"acct-splits\" placeholder=\"ALVIN 45&#10;GW 12&#10;AINA 43\"></textarea></div>" +
+        "<input id=\"acct-id\" type=\"hidden\">" +
+        "<button class=\"btn\" type=\"submit\">Save splits</button></form></section>" +
+        "<div class=\"table-wrap\"><table><thead><tr><th>Code</th><th>Label</th><th>Kind</th><th>Parties</th><th></th></tr></thead><tbody>" +
+        (body || "<tr><td colspan=\"5\">No accounts yet.</td></tr>") + "</tbody></table></div>" +
+        "<section class=\"panel\"><h2>Investor parties</h2><p class=\"muted\">One Gmail can have several parties, one per line. Example: ANN and ANN-AINA.</p>" +
+        "<form id=\"party-form\" class=\"grid\"><div class=\"field\"><label>Investor Gmail</label><input id=\"party-email\" type=\"email\" required></div>" +
+        "<div class=\"field\"><label>Parties</label><textarea id=\"party-list\" placeholder=\"ANN&#10;ANN-AINA\"></textarea></div>" +
+        "<button class=\"btn\" type=\"submit\">Save parties</button></form></section>");
+      document.getElementById("acct-form").onsubmit = function (event) {
+        event.preventDefault();
+        var splits = document.getElementById("acct-splits").value.split(/\n/).map(function (line) {
+          var bits = line.trim().split(/\s+/);
+          if (bits.length < 2) return null;
+          return { party: bits.slice(0, -1).join(" "), percent: Number(bits[bits.length - 1]) };
+        }).filter(Boolean);
+        db.rpc("save_investor_account", {
+          p_id: document.getElementById("acct-id").value || null,
+          p_code: document.getElementById("acct-code").value.trim(),
+          p_label: document.getElementById("acct-label").value.trim(),
+          p_company: document.getElementById("acct-company").checked,
+          p_splits: splits
+        }).then(function (saved) {
+          if (saved.error) return flash(errText(saved.error));
+          flash("Splits saved.", true);
+          renderAccounts();
+        });
+      };
+      var partyForm = document.getElementById("party-form");
+      if (partyForm) partyForm.onsubmit = function (event) {
+        event.preventDefault();
+        db.rpc("set_investor_parties", {
+          p_email: document.getElementById("party-email").value.trim(),
+          p_parties: document.getElementById("party-list").value
+        }).then(function (saved) {
+          if (saved.error) return flash(errText(saved.error));
+          flash("Parties saved.", true);
+        });
+      };
+      app.querySelectorAll("[data-edit]").forEach(function (button) {
+        button.onclick = function () {
+          var row = rows.filter(function (item) { return item.id === button.getAttribute("data-edit"); })[0];
+          document.getElementById("acct-id").value = row.id;
+          document.getElementById("acct-code").value = row.code;
+          document.getElementById("acct-label").value = row.label;
+          document.getElementById("acct-company").checked = !!row.company;
+          document.getElementById("acct-splits").value = (row.investor_splits || []).map(function (item) {
+            return item.party + " " + item.percent;
+          }).join("\n");
+        };
+      });
+    });
+  }
+
+  function renderCommission() {
+    var gen = viewGen;
+    var range = cutoffRange(manilaToday());
+    shell("<section class=\"panel\"><h1>Commission</h1><p class=\"muted\">Loading…</p></section>");
+    db.from("investor_accounts").select("id, code").order("code").then(function (result) {
+      if (gen !== viewGen) return;
+      if (result.error) return flash(errText(result.error));
+      var options = (result.data || []).map(function (row) { return "<option value=\"" + row.id + "\">" + esc(row.code) + "</option>"; }).join("");
+      shell("<section class=\"panel\"><h1>Commission</h1>" +
+        "<p class=\"muted\">Gross = collections + pahabol + extra income + modem pullout fees. Amount left = gross − that account's operational expenses. A party's share is their percent of amount left, minus that party's personal expenses.</p>" +
+        "<form id=\"com-build\" class=\"grid two\">" +
+        "<div class=\"field\"><label>From</label><input id=\"com-start\" type=\"date\" value=\"" + range.start + "\"></div>" +
+        "<div class=\"field\"><label>To</label><input id=\"com-end\" type=\"date\" value=\"" + range.end + "\"></div>" +
+        "<button class=\"btn\" type=\"submit\">Build draft</button></form>" +
+        "<div id=\"com-out\"></div></section>" +
+        "<section class=\"panel\"><h2>Add to a cut-off</h2><form id=\"com-item\" class=\"grid two\">" +
+        "<div class=\"field\"><label>Kind</label><select id=\"item-kind\"><option value=\"extra\">Extra income</option><option value=\"pahabol\">Pahabol</option><option value=\"operational\">Operational expense</option><option value=\"personal\">Personal expense</option></select></div>" +
+        "<div class=\"field\"><label>Account</label><select id=\"item-account\">" + options + "</select></div>" +
+        "<div class=\"field\"><label>Party</label><input id=\"item-party\" placeholder=\"Needed for personal\"></div>" +
+        "<div class=\"field\"><label>Amount</label><input id=\"item-amount\" type=\"number\" min=\"0\" step=\"0.01\" required></div>" +
+        "<div class=\"field\"><label>Date</label><input id=\"item-date\" type=\"date\" value=\"" + manilaToday() + "\"></div>" +
+        "<div class=\"field\"><label>Note</label><input id=\"item-note\"></div>" +
+        "<button class=\"btn\" type=\"submit\">Save</button></form></section>");
+      function show(start, end) {
+        db.from("commission_runs").select("*").eq("cutoff_start", start).eq("cutoff_end", end).maybeSingle().then(function (runResult) {
+          if (runResult.error) return flash(errText(runResult.error));
+          var run = runResult.data;
+          if (!run) {
+            document.getElementById("com-out").innerHTML = "<p>No report for this cut-off yet.</p>";
+            return;
+          }
+          var body = (run.snapshot || []).map(function (row) {
+            var parties = (row.parties || []).map(function (item) {
+              return esc(item.party) + " " + esc(item.percent) + "% → " + esc(money(item.share));
+            }).join("<br>");
+            return "<tr><td>" + esc(row.code) + "</td><td>" + esc(money(row.gross)) + "</td><td>" + esc(money(row.operational)) + "</td><td>" + esc(money(row.amount_left)) + "</td><td>" + parties + "</td></tr>";
+          }).join("");
+          document.getElementById("com-out").innerHTML = "<p>Status: " + esc(run.status) + "</p>" +
+            "<div class=\"actions\">" + (run.status === "draft" ? "<button type=\"button\" class=\"btn\" id=\"com-lock\">Lock</button>" : "") +
+            "<button type=\"button\" class=\"btn secondary\" id=\"com-pdf\">Export PDF</button></div>" +
+            "<div class=\"table-wrap\"><table><thead><tr><th>Account</th><th>Gross</th><th>Operational</th><th>Amount left</th><th>Shares</th></tr></thead><tbody>" +
+            (body || "<tr><td colspan=\"5\">No accounts.</td></tr>") + "</tbody></table></div>";
+          var lock = document.getElementById("com-lock");
+          if (lock) lock.onclick = function () {
+            db.rpc("lock_commission", { p_run: run.id }).then(function (saved) {
+              if (saved.error) return flash(errText(saved.error));
+              show(start, end);
+            });
+          };
+          document.getElementById("com-pdf").onclick = function () {
+            loadScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js").then(function () {
+              var JsPDF = window.jspdf && window.jspdf.jsPDF;
+              if (!JsPDF) return flash("Could not load the PDF library.");
+              var doc = new JsPDF();
+              var y = 16;
+              doc.setFontSize(12);
+              doc.text("FiberBro commission " + run.cutoff_start + " to " + run.cutoff_end, 14, y);
+              (run.snapshot || []).forEach(function (row) {
+                y += 8;
+                if (y > 280) { doc.addPage(); y = 16; }
+                doc.text(row.code + "  gross " + row.gross + "  left " + row.amount_left, 14, y);
+                (row.parties || []).forEach(function (item) {
+                  y += 6;
+                  if (y > 280) { doc.addPage(); y = 16; }
+                  doc.text("  " + item.party + " " + item.percent + "%  share " + item.share, 14, y);
+                });
+              });
+              doc.save("commission-" + run.cutoff_start + ".pdf");
+            });
+          };
+        });
+      }
+      document.getElementById("com-build").onsubmit = function (event) {
+        event.preventDefault();
+        var start = document.getElementById("com-start").value;
+        var end = document.getElementById("com-end").value;
+        db.rpc("build_commission", { p_start: start, p_end: end }).then(function (saved) {
+          if (saved.error) return flash(errText(saved.error));
+          flash("Draft built.", true);
+          show(start, end);
+        });
+      };
+      document.getElementById("com-item").onsubmit = function (event) {
+        event.preventDefault();
+        db.rpc("add_commission_item", {
+          p_kind: document.getElementById("item-kind").value,
+          p_account: document.getElementById("item-account").value,
+          p_amount: Number(document.getElementById("item-amount").value),
+          p_date: document.getElementById("item-date").value,
+          p_note: document.getElementById("item-note").value.trim(),
+          p_party: document.getElementById("item-party").value.trim(),
+          p_customer: null
+        }).then(function (saved) {
+          if (saved.error) return flash(errText(saved.error));
+          flash("Saved.", true);
+        });
+      };
+      show(range.start, range.end);
+    });
+  }
+
+
   function render() {
     viewGen += 1;
     var current = route();
@@ -3788,6 +3965,8 @@
       return;
     }
     if (current.name === "investors") return renderPeople("investors");
+    if (current.name === "accounts") return renderAccounts();
+    if (current.name === "commission") return renderCommission();
     if (current.name === "technicians") return renderPeople("technicians");
     if (current.name === "tickets") return renderTickets();
     if (current.name === "admins") return renderAdmins();
